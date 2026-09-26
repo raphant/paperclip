@@ -176,6 +176,9 @@ describeEmbeddedPostgres("connector lifecycle telemetry (tool-access)", () => {
       "paperclip-lifecycle-telemetry-",
     );
     db = createDb(tempDb.connectionString);
+    await instanceSettingsService(db).updateExperimental({
+      enableMcpAggregators: true,
+    });
   }, 30_000);
 
   afterEach(async () => {
