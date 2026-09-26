@@ -138,7 +138,14 @@ export function parseAcpxStdoutLine(line: string, ts: string): TranscriptEntry[]
   }
 
   if (type === "acpx.status") {
-    return [{ kind: "system", ts, text: statusText(parsed) }];
+    const used = asNumber(parsed.used, -1);
+    const size = asNumber(parsed.size, -1);
+    return [{
+      kind: "system",
+      ts,
+      text: statusText(parsed),
+      ...(used >= 0 && size > 0 ? { contextUsage: { used, size } } : {}),
+    }];
   }
 
   if (type === "acpx.result") {

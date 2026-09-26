@@ -581,6 +581,10 @@ export function transcriptToTaskChatItems(
   let messageIndex = -1;
   let messageChannel: "progress" | "final" | "unknown" | undefined;
   let messageItemId: string | undefined;
+  // ACP agents report context occupancy many times per run; only the latest
+  // reading is meaningful (compaction lowers it), so one gauge is emitted after
+  // the loop instead of a row per update splitting streamed messages.
+  let latestContextUsage: { used: number; size: number } | undefined;
 
   const finishThinking = () => {
     if (thinkingIndex >= 0) {
@@ -998,11 +1002,24 @@ export function transcriptToTaskChatItems(
         resetInline();
         break;
       }
-      // init / stderr / stdout / system / user and non-runner result entries
-      // carry no thread-visible content (status is rendered separately).
+      case "system": {
+        if (entry.contextUsage) latestContextUsage = entry.contextUsage;
+        break;
+      }
+      // init / stderr / stdout / user and non-runner result entries carry no
+      // thread-visible content (status is rendered separately).
       default:
         break;
     }
+  }
+
+  if (latestContextUsage) {
+    items.push({
+      id: `${runId}:context`,
+      kind: "usage",
+      label: "Context",
+      usage: { ...latestContextUsage },
+    });
   }
 
   // Only the message still open at the transcript tail is streaming; earlier

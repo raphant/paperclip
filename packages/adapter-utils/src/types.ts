@@ -581,6 +581,14 @@ export interface TranscriptWorkspaceChangeFile {
   diff: string | null;
 }
 
+/** Provider-reported context window occupancy (ACP `usage_update`). */
+export interface TranscriptContextUsage {
+  /** Tokens currently in the context window. */
+  used: number;
+  /** Size of the context window in tokens. */
+  size: number;
+}
+
 export interface TranscriptRunVerification {
   commandOrCheck: string;
   status: "passed" | "failed" | "not_run";
@@ -642,7 +650,7 @@ export type TranscriptEntry =
   | { kind: "init"; ts: string; model: string; sessionId: string }
   | { kind: "result"; ts: string; text: string; inputTokens: number; outputTokens: number; cachedTokens: number; costUsd: number; subtype: string; isError: boolean; errors: string[] }
   | { kind: "stderr"; ts: string; text: string }
-  | { kind: "system"; ts: string; text: string }
+  | { kind: "system"; ts: string; text: string; contextUsage?: TranscriptContextUsage }
   | { kind: "stdout"; ts: string; text: string }
   | { kind: "diff"; ts: string; changeType: "add" | "remove" | "context" | "hunk" | "file_header" | "truncation"; text: string }
   | { kind: "provider_activity"; ts: string; family: ProviderActivityFamily; eventType: string; status: ProviderActivityStatus; title: string; summary: string; payload: Record<string, unknown> }

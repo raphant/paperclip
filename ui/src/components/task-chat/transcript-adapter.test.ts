@@ -2836,3 +2836,39 @@ describe("prependIssueBrief (PAP-375)", () => {
     expect(prependIssueBrief(items, false)).toBe(items);
   });
 });
+
+describe("transcriptToTaskChatItems ACP context usage", () => {
+  it("emits one context gauge with the latest reading", () => {
+    const items = transcriptToTaskChatItems(
+      [
+        { kind: "system", ts: TS, text: "usage_update", contextUsage: { used: 150_000, size: 200_000 } },
+        { kind: "assistant", ts: TS, text: "Still ", delta: true },
+        { kind: "system", ts: TS, text: "usage_update", contextUsage: { used: 12_000, size: 200_000 } },
+        { kind: "assistant", ts: TS, text: "working.", delta: true },
+      ],
+      { runId: "acp-run", running: true },
+    );
+
+    expect(items.filter((item) => item.kind === "usage")).toEqual([
+      {
+        id: "acp-run:context",
+        kind: "usage",
+        label: "Context",
+        usage: { used: 12_000, size: 200_000 },
+      },
+    ]);
+    // Context readings between deltas must not split the streamed message.
+    expect(items.filter((item) => item.kind === "message")).toEqual([
+      expect.objectContaining({ text: "Still working." }),
+    ]);
+  });
+
+  it("emits no gauge for status entries without context usage", () => {
+    const items = transcriptToTaskChatItems(
+      [{ kind: "system", ts: TS, text: "Working" }],
+      { runId: "acp-run", running: true },
+    );
+
+    expect(items).toEqual([]);
+  });
+});
