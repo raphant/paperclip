@@ -11,13 +11,20 @@ import {
 } from "../services/agent-permissions.js";
 
 describe("agent permissions service", () => {
-  it("grants agent-creation authority to new agents by default", () => {
-    expect(defaultAgentPermissions({ context: "create" }).canCreateAgents).toBe(true);
-    expect(normalizeAgentPermissions(undefined, { context: "create" }).canCreateAgents).toBe(true);
-    expect(normalizeAgentPermissions({}, { context: "create" }).canCreateAgents).toBe(true);
+  it("grants agent-creation authority to new CEO and CTO agents by default", () => {
+    expect(defaultAgentPermissions({ context: "create", role: "ceo" }).canCreateAgents).toBe(true);
+    expect(normalizeAgentPermissions(undefined, { context: "create", role: "cto" }).canCreateAgents).toBe(true);
+    expect(normalizeAgentPermissions({}, { context: "create", role: "ceo" }).canCreateAgents).toBe(true);
     expect(
-      normalizeAgentPermissions({ trustPreset: "standard" }, { context: "create" }).canCreateAgents,
+      normalizeAgentPermissions({ trustPreset: "standard" }, { context: "create", role: "cto" }).canCreateAgents,
     ).toBe(true);
+  });
+
+  it("withholds agent-creation authority from new agents of other roles", () => {
+    expect(defaultAgentPermissions({ context: "create", role: "general" }).canCreateAgents).toBe(false);
+    expect(normalizeAgentPermissions({}, { context: "create", role: "engineer" }).canCreateAgents).toBe(false);
+    expect(normalizeAgentPermissions({}, { context: "create" }).canCreateAgents).toBe(false);
+    expect(normalizeAgentPermissions({}, { role: "ceo" }).canCreateAgents).toBe(false);
   });
 
   it("keeps stored rows without an explicit value fail-closed", () => {
@@ -30,23 +37,23 @@ describe("agent permissions service", () => {
   });
 
   it("withholds agent-creation authority from new low-trust agents", () => {
-    expect(defaultAgentPermissions({ lowTrust: true, context: "create" }).canCreateAgents).toBe(false);
+    expect(defaultAgentPermissions({ lowTrust: true, context: "create", role: "ceo" }).canCreateAgents).toBe(false);
     expect(
       normalizeAgentPermissions(
         { trustPreset: LOW_TRUST_REVIEW_PRESET },
-        { context: "create" },
+        { context: "create", role: "ceo" },
       ).canCreateAgents,
     ).toBe(false);
     expect(
       normalizeAgentPermissions(
         { authorizationPolicy: { trustPreset: LOW_TRUST_REVIEW_PRESET } },
-        { context: "create" },
+        { context: "create", role: "ceo" },
       ).canCreateAgents,
     ).toBe(false);
     expect(
       normalizeAgentPermissions(
         { authorizationPolicy: { trustBoundary: { mode: LOW_TRUST_REVIEW_PRESET } } },
-        { context: "create" },
+        { context: "create", role: "ceo" },
       ).canCreateAgents,
     ).toBe(false);
   });

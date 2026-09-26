@@ -39,22 +39,29 @@ export function permissionsImplyLowTrust(permissions: unknown): boolean {
  */
 export type AgentPermissionsContext = "create" | "stored";
 
+/** Roles that get agent-creation authority by default when a new agent is created. */
+const AGENT_CREATOR_ROLES = new Set(["ceo", "cto"]);
+
 export function defaultAgentPermissions(
-  options?: { lowTrust?: boolean; context?: AgentPermissionsContext },
+  options?: { lowTrust?: boolean; context?: AgentPermissionsContext; role?: string | null },
 ): NormalizedAgentPermissions {
   return {
-    canCreateAgents: options?.context === "create" && options?.lowTrust !== true,
+    canCreateAgents:
+      options?.context === "create" &&
+      options?.lowTrust !== true &&
+      AGENT_CREATOR_ROLES.has(options?.role ?? ""),
     canCreateSkills: true,
   };
 }
 
 export function normalizeAgentPermissions(
   permissions: unknown,
-  options?: { context?: AgentPermissionsContext },
+  options?: { context?: AgentPermissionsContext; role?: string | null },
 ): NormalizedAgentPermissions {
   const defaults = defaultAgentPermissions({
     lowTrust: permissionsImplyLowTrust(permissions),
     context: options?.context ?? "stored",
+    role: options?.role,
   });
   const record = asRecord(permissions);
   if (!record) {

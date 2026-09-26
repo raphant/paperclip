@@ -1839,6 +1839,60 @@ describe.sequential("agent permission routes", () => {
     expect(mockAccessService.setPrincipalPermission).not.toHaveBeenCalled();
   });
 
+  describe("board-only canCreateAgents and the CEO/CTO permissions gate", () => {
+    const managerId = "44444444-4444-4444-8444-444444444444";
+
+    function actAs(role: string) {
+      mockAgentService.getById.mockImplementation(async (id: string) =>
+        id === managerId
+          ? { ...baseAgent, id: managerId, role, permissions: { canCreateAgents: true } }
+          : baseAgent);
+      return createApp({ type: "agent", agentId: managerId, companyId, runId: "run-1", source: "agent_key" });
+    }
+
+    it("rejects a CEO agent changing canCreateAgents", async () => {
+      const app = await actAs("ceo");
+      const res = await requestApp(app, (baseUrl) => request(baseUrl)
+        .patch(`/api/agents/${agentId}/permissions`)
+        .send({ canCreateAgents: true, canAssignTasks: true }));
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe("Only the board can change canCreateAgents");
+      expect(mockAgentService.updatePermissions).not.toHaveBeenCalled();
+    });
+
+    it("lets a CTO agent change canCreateSkills", async () => {
+      const app = await actAs("cto");
+      const res = await requestApp(app, (baseUrl) => request(baseUrl)
+        .patch(`/api/agents/${agentId}/permissions`)
+        .send({ canCreateAgents: false, canCreateSkills: false, canAssignTasks: true }));
+      expect(res.status).toBe(200);
+      expect(mockAgentService.updatePermissions).toHaveBeenCalledWith(agentId, {
+        canCreateAgents: false,
+        canCreateSkills: false,
+        canAssignTasks: true,
+      });
+    });
+
+    it("rejects agents that are not CEO or CTO", async () => {
+      const app = await actAs("general");
+      const res = await requestApp(app, (baseUrl) => request(baseUrl)
+        .patch(`/api/agents/${agentId}/permissions`)
+        .send({ canCreateAgents: false, canCreateSkills: false, canAssignTasks: true }));
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe("Only CEO or CTO can manage permissions");
+    });
+
+    it("rejects an agent setting canCreateAgents on direct create", async () => {
+      const app = await actAs("ceo");
+      const res = await requestApp(app, (baseUrl) => request(baseUrl)
+        .post(`/api/companies/${companyId}/agents`)
+        .send({ name: "Helper", role: "engineer", adapterType: "process", permissions: { canCreateAgents: true } }));
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe("Only the board can change canCreateAgents");
+      expect(mockAgentService.create).not.toHaveBeenCalled();
+    });
+  });
+
   it("exposes a dedicated agent route for the inbox mine view", async () => {
     mockIssueService.list.mockResolvedValue([
       {

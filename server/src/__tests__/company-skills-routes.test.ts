@@ -1450,7 +1450,7 @@ describe("company skill mutation permissions", () => {
     mockAgentService.getById.mockResolvedValue({
       id: "55555555-5555-4555-8555-555555555555",
       companyId: "company-1",
-      permissions: { canCreateSkills: false },
+      permissions: { canCreateSkills: true },
     });
 
     const res = await request(await createApp({
@@ -1469,6 +1469,34 @@ describe("company skill mutation permissions", () => {
     }));
     expect(mockAccessService.hasPermission).not.toHaveBeenCalledWith("company-1", "agent", "55555555-5555-4555-8555-555555555555", "agents:create");
     expect(mockCompanySkillService.importFromSource).toHaveBeenCalled();
+  });
+
+  it("blocks skill create and import for agents with canCreateSkills off", async () => {
+    mockAccessService.decide.mockResolvedValue(denySkillChangeDecision());
+    mockAgentService.getById.mockResolvedValue({
+      id: "55555555-5555-4555-8555-555555555555",
+      companyId: "company-1",
+      permissions: { canCreateSkills: false },
+    });
+    const app = await createApp({
+      type: "agent",
+      agentId: "55555555-5555-4555-8555-555555555555",
+      companyId: "company-1",
+      runId: "run-1",
+    });
+
+    const created = await request(app)
+      .post("/api/companies/company-1/skills")
+      .send({ name: "Draft", slug: "draft", markdown: "# Draft" });
+    const imported = await request(app)
+      .post("/api/companies/company-1/skills/import")
+      .send({ source: "https://github.com/vercel-labs/agent-browser" });
+
+    expect(created.status).toBe(403);
+    expect(created.body.details?.code ?? created.body.code).toBe("skill_create_disabled");
+    expect(imported.status).toBe(403);
+    expect(mockCompanySkillService.createLocalSkill).not.toHaveBeenCalled();
+    expect(mockCompanySkillService.importFromSource).not.toHaveBeenCalled();
   });
 
   it("blocks agent catalog installs for other companies", async () => {
@@ -1758,7 +1786,7 @@ describe("company skill mutation permissions", () => {
     mockAgentService.getById.mockResolvedValue({
       id: "55555555-5555-4555-8555-555555555555",
       companyId: "company-1",
-      permissions: { canCreateSkills: false },
+      permissions: { canCreateSkills: true },
     });
 
     const res = await request(await createApp({
@@ -1888,7 +1916,7 @@ describe("company skill mutation permissions", () => {
     mockAgentService.getById.mockResolvedValue({
       id: "agent-1",
       companyId: "company-1",
-      permissions: { canCreateSkills: false },
+      permissions: { canCreateSkills: true },
     });
     mockAccessService.hasPermission.mockImplementation(async (
       _companyId: string,

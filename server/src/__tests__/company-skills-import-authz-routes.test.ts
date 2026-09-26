@@ -126,7 +126,7 @@ describeEmbeddedPostgres("company skill import authorization routes", () => {
       adapterType: "codex_local",
       adapterConfig: {},
       runtimeConfig: {},
-      permissions: { canCreateSkills: false },
+      permissions: { canCreateSkills: true },
     }).returning();
     const agentId = agent!.id;
 

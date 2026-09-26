@@ -4755,6 +4755,9 @@ export function agentRoutes(
   router.post("/companies/:companyId/agents", validate(createAgentSchema), async (req, res) => {
     const companyId = req.params.companyId as string;
     await assertCanCreateAgentsForCompany(req, companyId);
+    if (req.actor.type === "agent" && req.body.permissions?.canCreateAgents !== undefined) {
+      throw forbidden("Only the board can change canCreateAgents");
+    }
 
     const company = await db
       .select()
@@ -4933,8 +4936,12 @@ export function agentRoutes(
         res.status(403).json({ error: "Forbidden" });
         return;
       }
-      if (actorAgent.role !== "ceo") {
-        res.status(403).json({ error: "Only CEO can manage permissions" });
+      if (actorAgent.role !== "ceo" && actorAgent.role !== "cto") {
+        res.status(403).json({ error: "Only CEO or CTO can manage permissions" });
+        return;
+      }
+      if (req.body.canCreateAgents !== Boolean(existing.permissions?.canCreateAgents)) {
+        res.status(403).json({ error: "Only the board can change canCreateAgents" });
         return;
       }
     } else {

@@ -34,6 +34,7 @@ import { trackSkillImported } from "@paperclipai/shared/telemetry";
 import { validate } from "../middleware/validate.js";
 import {
   accessService,
+  agentService,
   companySkillService,
   heartbeatService,
   issueService,
@@ -91,6 +92,7 @@ type SkillPolicyResourceInput =
 export function companySkillRoutes(db: Db) {
   const router = Router();
   const access = accessService(db);
+  const agents = agentService(db);
   const svc = companySkillService(db);
   const issues = issueService(db);
   const heartbeat = heartbeatService(db);
@@ -209,6 +211,14 @@ export function companySkillRoutes(db: Db) {
       throw forbidden("Agent key cannot access another company", { code: "skill_company_boundary_denied" });
     }
     assertCompanyAccess(req, companyId);
+    // canCreateSkills: false blocks an agent from adding new skills. Other skill
+    // actions stay under the company skill policy below.
+    if (req.actor.type === "agent" && (action === "skills.create" || action === "skills.import")) {
+      const actorAgent = req.actor.agentId ? await agents.getById(req.actor.agentId) : null;
+      if (actorAgent && actorAgent.permissions?.canCreateSkills === false) {
+        throw forbidden("Agent is not allowed to create skills", { code: "skill_create_disabled" });
+      }
+    }
     const platformDecision = await access.decide({
       actor: req.actor,
       action: "skill_config:update",

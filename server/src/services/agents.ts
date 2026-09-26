@@ -888,7 +888,7 @@ export function agentService(db: Db) {
       const uniqueName = deduplicateAgentName(data.name, existingAgents);
 
       const role = data.role ?? "general";
-      const normalizedPermissions = normalizeAgentPermissions(data.permissions, { context: "create" });
+      const normalizedPermissions = normalizeAgentPermissions(data.permissions, { context: "create", role });
       const runtimeConfig = normalizeRuntimeConfigForNewAgent(data.runtimeConfig);
       const adapterType = data.adapterType ?? "process";
       const rawAdapterConfig = isPlainRecord(data.adapterConfig)
@@ -1132,7 +1132,10 @@ export function agentService(db: Db) {
         if (patch.permissions !== undefined) {
           // The pending-approval activation replays the original hire
           // request, so the new-agent creation default applies.
-          patch.permissions = normalizeAgentPermissions(patch.permissions, { context: "create" });
+          patch.permissions = normalizeAgentPermissions(patch.permissions, {
+            context: "create",
+            role: (patch.role as string | undefined) ?? existing.role,
+          });
         }
         const updated = await tx
           .update(agents)

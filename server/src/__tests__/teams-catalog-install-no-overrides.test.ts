@@ -113,7 +113,9 @@ describeEmbeddedPostgres("teams catalog install with no caller adapter overrides
     const adapterTypes = Array.from(byName.values()).map((row) => row.adapterType);
     expect(adapterTypes).toEqual(["claude_local", "claude_local", "claude_local"]);
     expect(adapterTypes).not.toContain("process");
-    expect(byName.get("CTO")?.permissions).toMatchObject({ canCreateAgents: true });
+    // Only the board sets canCreateAgents; the bundle's value is dropped on the
+    // safe import path and this CTO's role is not ceo/cto.
+    expect(byName.get("CTO")?.permissions).toMatchObject({ canCreateAgents: false });
   });
 
   it("honors an explicit caller adapter override for a single slug while defaulting the rest to claude_local", async () => {

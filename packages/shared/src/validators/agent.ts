@@ -14,8 +14,9 @@ import { agentDesiredSkillSelectionSchema } from "./adapter-skills.js";
 import { objectWithoutDefaults } from "./partial.js";
 
 export const agentPermissionsSchema = z.object({
-  // No schema default: the server derives the default (enabled unless the
-  // permissions record marks the agent low-trust) when the field is omitted.
+  // No schema default: the server derives the default (enabled for role
+  // ceo/cto unless the permissions record marks the agent low-trust) when the
+  // field is omitted. Only the board may send it.
   canCreateAgents: z.boolean().optional(),
   canCreateSkills: z.boolean().optional().default(true),
   trustPreset: trustPresetSchema.optional(),

@@ -261,6 +261,11 @@ function resolveSkillConflictStrategy(mode: ImportMode, collisionStrategy: Compa
   return collisionStrategy === "skip" ? "skip" as const : "rename" as const;
 }
 
+function withoutCanCreateAgents(permissions: Record<string, unknown>) {
+  const { canCreateAgents: _dropped, ...rest } = permissions;
+  return rest;
+}
+
 function collectAgentSafeImportPolicyErrors(
   manifest: CompanyPortabilityManifest,
   include: CompanyPortabilityInclude,
@@ -5603,7 +5608,11 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
             adapterConfig: normalizedAdapter.adapterConfig,
             runtimeConfig: sanitizeImportedAgentRuntimeConfig(manifestAgent.runtimeConfig),
             budgetMonthlyCents: manifestAgent.budgetMonthlyCents,
-            permissions: manifestAgent.permissions,
+            // Only the board sets canCreateAgents. The safe import route is open
+            // to CEO agents, so there the role default decides instead.
+            permissions: mode === "agent_safe"
+              ? withoutCanCreateAgents(manifestAgent.permissions)
+              : manifestAgent.permissions,
             metadata: manifestAgent.metadata,
           };
           // "import", not "system": the UI reads this to explain that the
