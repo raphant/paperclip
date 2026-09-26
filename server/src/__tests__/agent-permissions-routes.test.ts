@@ -1891,6 +1891,16 @@ describe.sequential("agent permission routes", () => {
       expect(res.body.error).toBe("Only the board can change canCreateAgents");
       expect(mockAgentService.create).not.toHaveBeenCalled();
     });
+
+    it("rejects an agent setting canCreateAgents on hire", async () => {
+      const app = await actAs("ceo");
+      const res = await requestApp(app, (baseUrl) => request(baseUrl)
+        .post(`/api/companies/${companyId}/agent-hires`)
+        .send({ name: "Helper", role: "engineer", adapterType: "process", permissions: { canCreateAgents: true } }));
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe("Only the board can change canCreateAgents");
+      expect(mockAgentService.create).not.toHaveBeenCalled();
+    });
   });
 
   it("exposes a dedicated agent route for the inbox mine view", async () => {

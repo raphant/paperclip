@@ -4435,6 +4435,9 @@ export function agentRoutes(
   router.post("/companies/:companyId/agent-hires", validate(createAgentHireSchema), async (req, res) => {
     const companyId = req.params.companyId as string;
     await assertCanCreateAgentsForCompany(req, companyId);
+    if (req.actor.type === "agent" && req.body.permissions?.canCreateAgents !== undefined) {
+      throw forbidden("Only the board can change canCreateAgents");
+    }
     const sourceIssueIds = parseSourceIssueIds(req.body);
     const {
       desiredSkills: requestedDesiredSkills,
