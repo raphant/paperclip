@@ -536,6 +536,19 @@ describe("claude remote execution", () => {
         (call[2] as string[]).includes("--version"),
       )).toBe(false);
     });
+
+    // Fork change: --setting-sources user hid the project's CLAUDE.md, its
+    // skills, and the --add-dir bundle's skills from managed-connection runs.
+    it("loads every setting source with a managed AI connection", async () => {
+      const { args } = await executeWithModel("paperclip-claude-setting-sources-", {
+        model: "claude-opus-5-5",
+        managedAiConnection: { provider: "anthropic", method: "oauth_token" },
+      });
+
+      expect(args).toContain("--print");
+      expect(args).not.toContain("--setting-sources");
+      expect(args).toContain("--add-dir");
+    });
   });
 
 });

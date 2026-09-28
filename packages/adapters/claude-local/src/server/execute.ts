@@ -877,8 +877,12 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     resumeSessionId: string | null,
     attemptInstructionsFilePath: string | undefined,
   ) => {
+    // No --setting-sources, even with a managed AI connection: Claude loads the
+    // project's CLAUDE.md and skills, and the --add-dir bundle's skills, only
+    // from the project source (the ACP engine loads all sources too). The login
+    // stays safe: heartbeat's assertManagedAiProjectAuth refuses a cwd whose
+    // .claude settings hold auth keys.
     const args = ["--print", "--output-format", "stream-json", "--verbose"];
-    if (config.managedAiConnection) args.push("--setting-sources", "user");
     if (resumeSessionId) args.push("--resume", resumeSessionId);
     args.push(...buildClaudeExecutionPermissionArgs({
       dangerouslySkipPermissions,
