@@ -2045,6 +2045,7 @@ export function ConfigurationTab({
   const canCreateAgents = Boolean(agent.permissions?.canCreateAgents);
   const canCreateSkills = agent.permissions?.canCreateSkills !== false;
   const canAssignTasks = Boolean(agent.access?.canAssignTasks);
+  const canConfigureAgents = Boolean(agent.access?.canConfigureAgents);
   const taskAssignSource = agent.access?.taskAssignSource ?? "none";
   const taskAssignLocked = agent.role === "ceo" || canCreateAgents;
   const taskAssignHint =
@@ -2122,6 +2123,26 @@ export function ConfigurationTab({
                   canCreateAgents: !canCreateAgents,
                   canCreateSkills,
                   canAssignTasks: !canCreateAgents ? true : canAssignTasks,
+                })
+              }
+              disabled={updatePermissions.isPending}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-4 text-sm">
+            <div className="space-y-1">
+              <div>Can configure agents</div>
+              <p className="text-xs text-muted-foreground">
+                Lets this agent change other agents' instructions and skills. Only the board can change this.
+              </p>
+            </div>
+            <ToggleSwitch
+              checked={canConfigureAgents}
+              onCheckedChange={() =>
+                updatePermissions.mutate({
+                  canCreateAgents,
+                  canCreateSkills,
+                  canAssignTasks,
+                  canConfigureAgents: !canConfigureAgents,
                 })
               }
               disabled={updatePermissions.isPending}

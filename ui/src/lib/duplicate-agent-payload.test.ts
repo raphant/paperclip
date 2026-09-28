@@ -41,6 +41,7 @@ const baseAgent: AgentDetail = {
   access: {
     canAssignTasks: true,
     taskAssignSource: "explicit_grant",
+    canConfigureAgents: false,
     membership: null,
     grants: [],
   },

@@ -63,6 +63,8 @@ export interface AgentInstructionsBundle {
 export interface AgentAccessState {
   canAssignTasks: boolean;
   taskAssignSource: "simple_default" | "explicit_grant" | "agent_creator" | "ceo_role" | "none";
+  /** True when the agent holds the agents:configure grant. Only the board can change it. */
+  canConfigureAgents: boolean;
   membership: CompanyMembership | null;
   grants: PrincipalPermissionGrant[];
 }

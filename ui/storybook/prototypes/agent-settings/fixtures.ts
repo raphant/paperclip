@@ -112,6 +112,7 @@ export function createSettingsFixtures(
     access: {
       canAssignTasks: true,
       taskAssignSource: "explicit_grant",
+      canConfigureAgents: false,
       membership: null,
       grants: [],
     },

@@ -1818,6 +1818,35 @@ describe.sequential("agent permission routes", () => {
     expect(res.body.permissions.canCreateSkills).toBe(false);
   });
 
+  it.each([true, false])("lets the board set canConfigureAgents to %s as the agents:configure grant", async (value) => {
+    const app = await createApp({
+      type: "board",
+      userId: "board-user",
+      source: "local_implicit",
+      isInstanceAdmin: true,
+      companyIds: [companyId],
+    });
+
+    const res = await requestApp(app, (baseUrl) => request(baseUrl)
+      .patch(`/api/agents/${agentId}/permissions`)
+      .send({ canCreateAgents: false, canAssignTasks: true, canConfigureAgents: value }));
+
+    expect(res.status).toBe(200);
+    expect(mockAccessService.setPrincipalPermission).toHaveBeenCalledWith(
+      companyId,
+      "agent",
+      agentId,
+      "agents:configure",
+      value,
+      "board-user",
+    );
+    // The grant row is the only truth; nothing goes into agent.permissions.
+    expect(mockAgentService.updatePermissions).toHaveBeenCalledWith(agentId, {
+      canCreateAgents: false,
+      canAssignTasks: true,
+    });
+  });
+
   it("rejects CEO permission updates outside the caller company scope", async () => {
     const app = await createApp({
       type: "agent",
@@ -1880,6 +1909,17 @@ describe.sequential("agent permission routes", () => {
         .send({ canCreateAgents: false, canCreateSkills: false, canAssignTasks: true }));
       expect(res.status).toBe(403);
       expect(res.body.error).toBe("Only CEO or CTO can manage permissions");
+    });
+
+    it("rejects a CEO agent granting canConfigureAgents", async () => {
+      const app = await actAs("ceo");
+      const res = await requestApp(app, (baseUrl) => request(baseUrl)
+        .patch(`/api/agents/${agentId}/permissions`)
+        .send({ canCreateAgents: false, canAssignTasks: true, canConfigureAgents: true }));
+      expect(res.status).toBe(403);
+      expect(res.body.error).toBe("Only the board can change canConfigureAgents");
+      expect(mockAgentService.updatePermissions).not.toHaveBeenCalled();
+      expect(mockAccessService.setPrincipalPermission).not.toHaveBeenCalled();
     });
 
     it("rejects an agent setting canCreateAgents on direct create", async () => {
