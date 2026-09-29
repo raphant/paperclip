@@ -11,6 +11,7 @@ import type {
   PaperclipQuestionSet,
 } from "@paperclipai/adapter-utils";
 import type { MentionOption } from "@/components/MarkdownEditor";
+import { MarkdownBody } from "@/components/MarkdownBody";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -274,7 +275,7 @@ export function QuestionForm({
   const [working, setWorking] = useState<"submit" | "cancel" | null>(null);
   const [inputUploading, setInputUploading] = useState(false);
   const [error, setError] = useState<FormError | null>(null);
-  const promptRef = useRef<HTMLParagraphElement>(null);
+  const promptRef = useRef<HTMLDivElement>(null);
   const previousPage = useRef(page);
 
   useEffect(() => {
@@ -515,9 +516,9 @@ export function QuestionForm({
       }}
     >
       {questionSet.description ? (
-        <p className="mb-3 text-sm text-muted-foreground">
+        <MarkdownBody className="mb-3 text-sm text-muted-foreground">
           {questionSet.description}
-        </p>
+        </MarkdownBody>
       ) : null}
       {question.answerMode === "text" ? (
         <div className="mb-2 flex items-center gap-3 text-xs text-muted-foreground">
@@ -541,18 +542,18 @@ export function QuestionForm({
             {question.header}
           </p>
         ) : null}
-        <p
+        <div
           ref={promptRef}
           tabIndex={-1}
           id={`${id}-${question.id}-prompt`}
-          className="text-sm font-medium leading-5 text-foreground"
+          className="text-sm leading-5 text-foreground outline-none"
         >
-          {question.prompt}
-        </p>
+          <MarkdownBody className="text-sm">{question.prompt}</MarkdownBody>
+        </div>
         {question.helpText ? (
-          <p className="mt-1 text-xs leading-4 text-muted-foreground">
+          <MarkdownBody className="mt-1 text-xs text-muted-foreground">
             {question.helpText}
-          </p>
+          </MarkdownBody>
         ) : null}
       </div>
       {question.answerMode === "text" ? (
