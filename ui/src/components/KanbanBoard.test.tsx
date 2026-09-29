@@ -181,10 +181,11 @@ describe("KanbanBoard", () => {
     const { container } = renderBoard({
       issues: createIssues(3, "done"),
       collapsedStatuses: ["done"],
+      laneFold: { all: true, lanes: {} },
     });
 
-    expect(container.textContent).toContain("Done");
-    expect(container.textContent).toContain("3");
+    expect(container.textContent).toContain("Done3/3");
+    expect(container.textContent).toContain("3 hidden");
     expect(container.textContent).not.toContain("Issue 1");
   });
 
@@ -222,6 +223,31 @@ describe("KanbanBoard", () => {
     expect(resolveKanbanTargetStatus("missing", issues)).toBeNull();
   });
 
+  it("gives each open Board lane its own status headers with lane counts", () => {
+    const parent = { ...createIssue(1, "in_progress"), title: "Parent task" };
+    const child = (index: number, status: IssueStatus, parentId: string | null) =>
+      ({ ...createIssue(index, status), parentId });
+    const finished = { ...createIssue(9, "done"), title: "Finished parent" };
+    const issues = [
+      child(2, "todo", parent.id),
+      child(3, "done", parent.id),
+      child(4, "done", finished.id),
+      parent,
+      child(5, "blocked", null),
+      finished,
+    ];
+
+    const { container } = renderBoard({ issues });
+    const lane = (title: string) =>
+      Array.from(container.querySelectorAll("section")).find((s) => s.textContent?.includes(title))!;
+    expect(lane("Parent task").textContent).toContain("Backlog0/2");
+    expect(lane("Parent task").textContent).toContain("Todo1/2");
+    expect(lane("Parent task").textContent).toContain("Done1/2");
+    expect(lane("No Parent").textContent).toContain("Blocked1/1");
+    // The all-done lane is folded to one line, with no headers.
+    expect(lane("Finished parent").textContent).not.toContain("Done1/1");
+  });
+
   it("groups tasks into one lane per parent, then No Parent, and drops by lane cell", () => {
     const parent = { ...createIssue(1, "in_progress"), title: "Parent task" };
     const child = (index: number, status: IssueStatus, parentId: string | null) =>
@@ -241,8 +267,11 @@ describe("KanbanBoard", () => {
     expect(lanes.map((lane) => [lane.parent?.title ?? "No Parent", lane.issues.map((i) => i.id)])).toEqual([
       ["Parent task", ["issue-todo-2", "issue-done-3"]],
       ["Finished parent", ["issue-done-4"]],
-      ["No Parent", ["issue-blocked-5"]],
+      ["No Parent", ["issue-blocked-5", "issue-backlog-6"]],
     ]);
+    // Grid leaves out Backlog and Cancelled.
+    expect(groupKanbanLanes(issues, ["todo", "in_progress", "in_review", "blocked", "done"]).at(-1)?.issues.map((i) => i.id))
+      .toEqual(["issue-blocked-5"]);
 
     const { container } = renderBoard({ issues });
     expect(container.textContent).toContain("1/2 done");
@@ -250,6 +279,11 @@ describe("KanbanBoard", () => {
     // The all-done lane folds to its header; its card is hidden.
     expect(container.textContent).toContain("Finished parent");
     expect(container.textContent).not.toContain("Issue 4");
+    // Collapse all folds every lane; Expand all opens the all-done lane too.
+    const { container: folded } = renderBoard({ issues, laneFold: { all: false, lanes: {} } });
+    expect(folded.textContent).not.toContain("Issue 2");
+    const { container: opened } = renderBoard({ issues, laneFold: { all: true, lanes: {} } });
+    expect(opened.textContent).toContain("Issue 4");
     // Dropping a card on another lane's cell changes only its status.
     expect(resolveKanbanTargetStatus(`${parent.id}:in_review`, issues)).toBe("in_review");
     expect(resolveKanbanTargetStatus("no-parent:done", issues)).toBe("done");

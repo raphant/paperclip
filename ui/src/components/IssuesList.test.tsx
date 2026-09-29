@@ -178,7 +178,8 @@ vi.mock("./IssueRow", () => ({
   ),
 }));
 
-vi.mock("./KanbanBoard", () => ({
+vi.mock("./KanbanBoard", async (importActual) => ({
+  anyKanbanLaneOpen: (await importActual<typeof import("./KanbanBoard")>()).anyKanbanLaneOpen,
   KANBAN_BOARD_HIGH_VOLUME_THRESHOLD: 100,
   KANBAN_COLD_STATUSES: ["backlog", "done", "cancelled"],
   KANBAN_COLUMN_DEFAULT_PAGE_SIZE: 10,
@@ -419,102 +420,6 @@ describe("IssuesList", () => {
     act(() => root.unmount());
   });
 
-  it("forwards external-object summaries into issue rows", async () => {
-    mockInstanceSettingsApi.getExperimental.mockResolvedValue({
-      enableIsolatedWorkspaces: false,
-      enableExternalObjects: true,
-    });
-    mockExternalObjectsApi.getIssueSummaries.mockResolvedValue({
-      summaries: {
-        "issue-1": {
-          total: 2,
-          byStatusCategory: { failed: 1, succeeded: 1 },
-          byLiveness: { fresh: 2 },
-          highestSeverity: "danger",
-          staleCount: 0,
-          authRequiredCount: 0,
-          unreachableCount: 0,
-          objects: [],
-        },
-      },
-    });
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[createIssue()]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        rowPresentation="task"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      expect(mockExternalObjectsApi.getIssueSummaries).toHaveBeenCalledWith("company-1", ["issue-1"]);
-      expect(container.querySelector("[data-testid='external-object-summary']")?.textContent).toBe("2");
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("keeps the canonical task-row presentation opt in per collection", async () => {
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[createIssue()]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        rowPresentation="task"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      const row = container.querySelector("[data-testid='issue-row']");
-      expect(row?.getAttribute("data-presentation")).toBe("task");
-      expect(row?.getAttribute("data-show-identifier")).toBe("true");
-      expect(row?.getAttribute("data-trailing-meta")).toMatch(/\S/);
-      expect(row?.getAttribute("data-trailing-meta")).not.toContain("Updated");
-      expect(row?.getAttribute("data-has-desktop-trailing")).toBe("false");
-      expect(row?.querySelector('[data-slot="task-row-disclosure-spacer"]')).not.toBeNull();
-    });
-
-    act(() => root.unmount());
-  });
-
-  it("reserves a disclosure column after each ancestor guide in canonical task trees", async () => {
-    const parent = createIssue({ id: "parent", identifier: "PAP-1", title: "Parent task" });
-    const child = createIssue({ id: "child", identifier: "PAP-2", parentId: parent.id, title: "Child task" });
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[parent, child]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        rowPresentation="task"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      const rows = Array.from(container.querySelectorAll('[data-testid="issue-row"]'));
-      const parentRow = rows.find((row) => row.textContent?.includes("Parent task"));
-      const childRow = rows.find((row) => row.textContent?.includes("Child task"));
-      expect(parentRow?.getAttribute("data-tree-guides")).toBe("0");
-      expect(parentRow?.querySelector('button[aria-label="Collapse sub-tasks"]')).not.toBeNull();
-      expect(childRow?.getAttribute("data-tree-guides")).toBe("1");
-      expect(childRow?.querySelector('[data-slot="task-row-disclosure-spacer"]')).not.toBeNull();
-    });
-
-    act(() => root.unmount());
-  });
-
   it("keeps the shared collection toolbar opt in per surface", async () => {
     const { root } = renderWithQueryClient(
       <IssuesList
@@ -533,91 +438,6 @@ describe("IssuesList", () => {
     });
 
     act(() => root.unmount());
-  });
-
-  it("does not load external-object summaries when the experimental flag is disabled", async () => {
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[createIssue()]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        rowPresentation="task"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      expect(mockInstanceSettingsApi.getExperimental).toHaveBeenCalled();
-      expect(container.querySelector("[data-testid='issue-row']")).not.toBeNull();
-    });
-    expect(mockExternalObjectsApi.getIssueSummaries).not.toHaveBeenCalled();
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("filters issue rows by external-object status summaries", async () => {
-    mockInstanceSettingsApi.getExperimental.mockResolvedValue({
-      enableIsolatedWorkspaces: false,
-      enableExternalObjects: true,
-    });
-    const failedIssue = createIssue({ id: "issue-failed", identifier: "PAP-10", title: "Failed external object" });
-    const freshIssue = createIssue({ id: "issue-fresh", identifier: "PAP-11", title: "Fresh external object" });
-    const noObjectIssue = createIssue({ id: "issue-none", identifier: "PAP-12", title: "No external object" });
-    localStorage.setItem("paperclip:test-issues:company-1", JSON.stringify({ externalObjectStatuses: ["failed"] }));
-    mockExternalObjectsApi.getIssueSummaries.mockResolvedValue({
-      summaries: {
-        "issue-failed": {
-          total: 1,
-          byStatusCategory: { failed: 1 },
-          byLiveness: { fresh: 1 },
-          highestSeverity: "danger",
-          staleCount: 0,
-          authRequiredCount: 0,
-          unreachableCount: 0,
-          objects: [],
-        },
-        "issue-fresh": {
-          total: 1,
-          byStatusCategory: { succeeded: 1 },
-          byLiveness: { fresh: 1 },
-          highestSeverity: "success",
-          staleCount: 0,
-          authRequiredCount: 0,
-          unreachableCount: 0,
-          objects: [],
-        },
-      },
-    });
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[failedIssue, freshIssue, noObjectIssue]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        rowPresentation="task"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      expect(mockExternalObjectsApi.getIssueSummaries).toHaveBeenCalledWith(
-        "company-1",
-        ["issue-failed", "issue-fresh", "issue-none"],
-      );
-      expect(container.textContent).toContain("Failed external object");
-      expect(container.textContent).not.toContain("Fresh external object");
-      expect(container.textContent).not.toContain("No external object");
-    });
-
-    act(() => {
-      root.unmount();
-    });
   });
 
   it("renders server search results instead of filtering the full issue list locally", async () => {
@@ -727,70 +547,6 @@ describe("IssuesList", () => {
     });
   });
 
-  it("uses workspace group defaults when creating an issue from a grouped section", async () => {
-    localStorage.setItem(
-      "paperclip:test-issues:company-1",
-      JSON.stringify({ groupBy: "workspace", sortField: "updated", sortDir: "desc" }),
-    );
-    mockInstanceSettingsApi.getExperimental.mockResolvedValue({ enableIsolatedWorkspaces: true });
-    mockExecutionWorkspacesApi.listSummaries.mockResolvedValue([
-      {
-        id: "execution-workspace-1",
-        name: "Feature Branch",
-        mode: "isolated_workspace",
-        projectWorkspaceId: "project-workspace-1",
-      },
-    ]);
-
-    const issue = createIssue({
-      id: "issue-workspace",
-      projectId: "project-1",
-      projectWorkspaceId: "project-workspace-1",
-      executionWorkspaceId: "execution-workspace-1",
-    });
-    const project = {
-      id: "project-1",
-      name: "Paperclip App",
-      color: null,
-      workspaces: [{ id: "project-workspace-1", name: "Primary workspace" }],
-      primaryWorkspace: { id: "project-workspace-1" },
-      executionWorkspacePolicy: { defaultProjectWorkspaceId: "project-workspace-1" },
-    } as Project;
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[issue]}
-        agents={[]}
-        projects={[project]}
-        viewStateKey="paperclip:test-issues"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      const button = container.querySelector<HTMLButtonElement>('button[aria-label="New task in Feature Branch"]');
-      expect(button).not.toBeNull();
-    });
-
-    await act(async () => {
-      const button = container.querySelector<HTMLButtonElement>('button[aria-label="New task in Feature Branch"]');
-      button?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    expect(dialogState.openNewIssue).toHaveBeenCalledWith({
-      executionWorkspaceId: "execution-workspace-1",
-      executionWorkspaceMode: "reuse_existing",
-      projectId: "project-1",
-      projectWorkspaceId: "project-workspace-1",
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
   it("renders the opt-in sub-issue progress summary with workflow next-up linking", async () => {
     const doneIssue = createIssue({
       id: "issue-done",
@@ -855,315 +611,6 @@ describe("IssuesList", () => {
       const link = container.querySelector('a[href="/issues/PAP-2"]');
       expect(link?.textContent).toContain("Implement next slice");
       expect(container.querySelector('[title="Cancelled: 1"]')).toBeNull();
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("adds checklist affordances for workflow-sorted sub-issue lists", async () => {
-    const issueDone = createIssue({
-      id: "issue-done",
-      identifier: "PAP-1",
-      title: "Done first",
-      status: "done",
-      createdAt: new Date("2026-04-01T00:00:00.000Z"),
-    });
-    const issueBlocked = createIssue({
-      id: "issue-blocked",
-      identifier: "PAP-2",
-      title: "Blocked issue",
-      status: "blocked",
-      blockedBy: [{ id: "issue-active", identifier: "PAP-3", title: "Active blocker", status: "todo", priority: "medium", assigneeAgentId: null, assigneeUserId: null }],
-      createdAt: new Date("2026-04-02T00:00:00.000Z"),
-    });
-    const issueActive = createIssue({
-      id: "issue-active",
-      identifier: "PAP-3",
-      title: "Active blocker",
-      status: "todo",
-      createdAt: new Date("2026-04-03T00:00:00.000Z"),
-    });
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[issueBlocked, issueActive, issueDone]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        defaultSortField="workflow"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      const rows = Array.from(container.querySelectorAll('[data-testid="issue-row"]'));
-      expect(rows).toHaveLength(3);
-      expect(rows.map((row) => row.getAttribute("data-step"))).toEqual(["1", "2", "3"]);
-      expect(container.textContent?.replace(/\s+/g, "")).toContain("1.PAP-1");
-      expect(container.textContent?.replace(/\s+/g, "")).toContain("2.PAP-3");
-      expect(rows.filter((row) => row.getAttribute("data-current-step") === "true")).toHaveLength(1);
-      expect(rows.find((row) => row.textContent?.includes("Active blocker"))?.getAttribute("data-current-step")).toBe("true");
-      expect(rows.find((row) => row.textContent?.includes("Done first"))?.getAttribute("data-title-class")).toContain("text-muted-foreground");
-      expect(container.textContent).toContain("blocked by PAP-3 · step 2");
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("hides the Priority option from the Sort and Group menus while priority UI is off (PAP-411)", async () => {
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[createIssue({ id: "issue-1", identifier: "PAP-1", title: "Task one" })]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        rowPresentation="task"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      expect(container.querySelectorAll('[data-testid="issue-row"]').length).toBeGreaterThan(0);
-    });
-
-    const sortButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.getAttribute("title") === "Sort",
-    );
-    expect(sortButton).toBeTruthy();
-    act(() => {
-      sortButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    await waitForAssertion(() => {
-      const labels = Array.from(document.body.querySelectorAll("button")).map((b) => b.textContent ?? "");
-      // Status sort option renders, but the Priority option is gated off (PAP-411).
-      expect(labels.some((text) => text.includes("Status"))).toBe(true);
-      expect(labels.some((text) => text.includes("Priority"))).toBe(false);
-    });
-
-    const groupButton = Array.from(container.querySelectorAll("button")).find(
-      (button) => button.getAttribute("title") === "Group",
-    );
-    expect(groupButton).toBeTruthy();
-    act(() => {
-      groupButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
-    await waitForAssertion(() => {
-      const labels = Array.from(document.body.querySelectorAll("button")).map((b) => b.textContent ?? "");
-      expect(labels.some((text) => text.includes("Status"))).toBe(true);
-      expect(labels.some((text) => text.includes("Priority"))).toBe(false);
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("hides the workflow blocker chip when a sub-issue is blocked only by its previous sibling", async () => {
-    const firstChild = createIssue({
-      id: "issue-first-child",
-      identifier: "PAP-1",
-      parentId: "issue-parent",
-      title: "First child",
-      status: "todo",
-      createdAt: new Date("2026-04-01T00:00:00.000Z"),
-    });
-    const secondChild = createIssue({
-      id: "issue-second-child",
-      identifier: "PAP-2",
-      parentId: "issue-parent",
-      title: "Second child",
-      status: "blocked",
-      blockedBy: [
-        {
-          id: "issue-first-child",
-          identifier: "PAP-1",
-          title: "First child",
-          status: "todo",
-          priority: "medium",
-          assigneeAgentId: null,
-          assigneeUserId: null,
-        },
-      ],
-      createdAt: new Date("2026-04-02T00:00:00.000Z"),
-    });
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[secondChild, firstChild]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        defaultSortField="workflow"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      const rows = Array.from(container.querySelectorAll('[data-testid="issue-row"]'));
-      expect(rows).toHaveLength(2);
-      expect(rows.map((row) => row.getAttribute("data-step"))).toEqual(["1", "2"]);
-      expect(container.textContent).not.toContain("blocked by PAP-1");
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("collapses multiple workflow blocker chips to the first blocker and a count", async () => {
-    const issueDone = createIssue({
-      id: "issue-done",
-      identifier: "PAP-1",
-      title: "Done first",
-      status: "done",
-      createdAt: new Date("2026-04-01T00:00:00.000Z"),
-    });
-    const firstBlocker = createIssue({
-      id: "issue-first-blocker",
-      identifier: "PAP-2",
-      title: "First blocker",
-      status: "todo",
-      createdAt: new Date("2026-04-02T00:00:00.000Z"),
-    });
-    const secondBlocker = createIssue({
-      id: "issue-second-blocker",
-      identifier: "PAP-3",
-      title: "Second blocker",
-      status: "todo",
-      createdAt: new Date("2026-04-03T00:00:00.000Z"),
-    });
-    const thirdBlocker = createIssue({
-      id: "issue-third-blocker",
-      identifier: "PAP-4",
-      title: "Third blocker",
-      status: "todo",
-      createdAt: new Date("2026-04-04T00:00:00.000Z"),
-    });
-    const issueBlocked = createIssue({
-      id: "issue-blocked",
-      identifier: "PAP-5",
-      title: "Blocked issue",
-      status: "blocked",
-      blockedBy: [
-        {
-          id: "issue-first-blocker",
-          identifier: "PAP-2",
-          title: "First blocker",
-          status: "todo",
-          priority: "medium",
-          assigneeAgentId: null,
-          assigneeUserId: null,
-        },
-        {
-          id: "issue-second-blocker",
-          identifier: "PAP-3",
-          title: "Second blocker",
-          status: "todo",
-          priority: "medium",
-          assigneeAgentId: null,
-          assigneeUserId: null,
-        },
-        {
-          id: "issue-third-blocker",
-          identifier: "PAP-4",
-          title: "Third blocker",
-          status: "todo",
-          priority: "medium",
-          assigneeAgentId: null,
-          assigneeUserId: null,
-        },
-      ],
-      createdAt: new Date("2026-04-05T00:00:00.000Z"),
-    });
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[issueBlocked, thirdBlocker, secondBlocker, firstBlocker, issueDone]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        defaultSortField="workflow"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      expect(container.textContent).toContain("blocked by PAP-2");
-      expect(container.textContent).toContain("... and 2 more");
-      expect(container.textContent).not.toContain("blocked by PAP-3");
-      expect(container.textContent).not.toContain("blocked by PAP-4");
-      const blockerButtons = Array.from(container.querySelectorAll("button"))
-        .filter((button) => button.textContent?.includes("blocked by"));
-      expect(blockerButtons).toHaveLength(1);
-      expect(blockerButtons[0]?.textContent).toBe("blocked by PAP-2 · step 2 ... and 2 more");
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("uses hierarchical checklist step numbers when nested rows render inline", async () => {
-    const firstRoot = createIssue({
-      id: "issue-first-root",
-      identifier: "PAP-1",
-      title: "First root",
-      status: "done",
-      createdAt: new Date("2026-04-01T00:00:00.000Z"),
-    });
-    const parent = createIssue({
-      id: "issue-parent",
-      identifier: "PAP-2",
-      title: "Parent slice",
-      status: "todo",
-      createdAt: new Date("2026-04-02T00:00:00.000Z"),
-    });
-    const nextRoot = createIssue({
-      id: "issue-next-root",
-      identifier: "PAP-3",
-      title: "Next root",
-      status: "todo",
-      createdAt: new Date("2026-04-03T00:00:00.000Z"),
-    });
-    const grandchild = createIssue({
-      id: "issue-grandchild",
-      identifier: "PAP-4",
-      title: "Nested cancelled cleanup",
-      status: "cancelled",
-      parentId: "issue-parent",
-      createdAt: new Date("2026-04-04T00:00:00.000Z"),
-    });
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[grandchild, nextRoot, firstRoot, parent]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        defaultSortField="workflow"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      const rows = Array.from(container.querySelectorAll('[data-testid="issue-row"]'));
-      expect(rows).toHaveLength(4);
-      expect(rows.map((row) => row.textContent)).toEqual([
-        expect.stringContaining("First root"),
-        expect.stringContaining("Parent slice"),
-        expect.stringContaining("Nested cancelled cleanup"),
-        expect.stringContaining("Next root"),
-      ]);
-      expect(rows.map((row) => row.getAttribute("data-step"))).toEqual(["1", "2", "2.1", "3"]);
     });
 
     act(() => {
@@ -1420,6 +867,81 @@ describe("IssuesList", () => {
     });
   });
 
+  it("defaults to Board and reads a saved List view as Board", async () => {
+    for (const saved of [null, JSON.stringify({ viewMode: "list" })]) {
+      localStorage.clear();
+      if (saved) localStorage.setItem("paperclip:test-issues:company-1", saved);
+      mockKanbanBoard.mockReset();
+
+      const { root } = renderWithQueryClient(
+        <IssuesList
+          issues={[createIssue({ id: "issue-default", title: "Default issue", status: "todo" })]}
+          agents={[]}
+          projects={[]}
+          viewStateKey="paperclip:test-issues"
+          onUpdateIssue={() => undefined}
+        />,
+        container,
+      );
+
+      await waitForAssertion(() => {
+        expect(mockKanbanBoard).toHaveBeenLastCalledWith(expect.objectContaining({ layout: "board" }));
+        const modes = Array.from(container.querySelectorAll('[aria-label="View mode"] button')).map((b) => b.textContent);
+        expect(modes).toEqual(["Board", "Grid"]);
+        const pressed = container.querySelector('[aria-label="View mode"] [aria-pressed="true"]');
+        expect(pressed?.textContent).toBe("Board");
+      });
+
+      act(() => {
+        root.unmount();
+      });
+    }
+  });
+
+  it("folds and opens every lane with one Collapse all / Expand all toggle", async () => {
+    const foldIssue = createIssue({ id: "issue-fold", title: "Fold issue", status: "todo" });
+    mockIssuesApi.list.mockImplementation((_companyId, filters) =>
+      Promise.resolve(filters?.status === "todo" ? [foldIssue] : []));
+
+    const { root } = renderWithQueryClient(
+      <IssuesList
+        issues={[foldIssue]}
+        agents={[]}
+        projects={[]}
+        viewStateKey="paperclip:test-issues"
+        onUpdateIssue={() => undefined}
+      />,
+      container,
+    );
+
+    const clickButton = async (label: string) => {
+      const button = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === label);
+      expect(button).toBeTruthy();
+      await act(() => {
+        button!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+    };
+
+    await waitForAssertion(() => {
+      expect(mockKanbanBoard).toHaveBeenLastCalledWith(expect.objectContaining({ laneFold: { all: null, lanes: {} } }));
+    });
+    expect(Array.from(container.querySelectorAll("button")).some((b) => b.textContent === "Expand all")).toBe(false);
+    await clickButton("Collapse all");
+    await waitForAssertion(() => {
+      expect(mockKanbanBoard).toHaveBeenLastCalledWith(expect.objectContaining({ laneFold: { all: false, lanes: {} } }));
+    });
+    expect(Array.from(container.querySelectorAll("button")).some((b) => b.textContent === "Collapse all")).toBe(false);
+    await clickButton("Expand all");
+    await waitForAssertion(() => {
+      expect(mockKanbanBoard).toHaveBeenLastCalledWith(expect.objectContaining({ laneFold: { all: true, lanes: {} } }));
+    });
+    await clickButton("Collapse all");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
   it("uses compact cards and collapsed cold lanes for high-volume boards", async () => {
     localStorage.setItem(
       "paperclip:test-issues:company-1",
@@ -1557,403 +1079,6 @@ describe("IssuesList", () => {
 
     await waitForAssertion(() => {
       expect(container.textContent).toContain("Some board columns are showing up to 200 tasks. Refine filters or search to reveal the rest.");
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("caps the first paint for large issue lists", async () => {
-    const manyIssues = Array.from({ length: 220 }, (_, index) =>
-      createIssue({
-        id: `issue-${index + 1}`,
-        identifier: `PAP-${index + 1}`,
-        title: `Issue ${index + 1}`,
-      }),
-    );
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={manyIssues}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      expect(container.querySelectorAll('[data-testid="issue-row"]')).toHaveLength(100);
-      expect(container.textContent).toContain("Rendering 100 of 220 tasks");
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("keeps rendering local issue batches while the user stays near the bottom", async () => {
-    const manyIssues = Array.from({ length: 420 }, (_, index) =>
-      createIssue({
-        id: `issue-${index + 1}`,
-        identifier: `PAP-${index + 1}`,
-        title: `Issue ${index + 1}`,
-      }),
-    );
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={manyIssues}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      expect(container.querySelectorAll('[data-testid="issue-row"]')).toHaveLength(100);
-    });
-
-    await flush();
-
-    act(() => {
-      setDocumentScrollMetrics({ innerHeight: 600, scrollY: 1500, scrollHeight: 2000 });
-      window.dispatchEvent(new Event("scroll"));
-    });
-    await flushAnimationFrame();
-
-    await waitForAssertion(() => {
-      expect(container.querySelectorAll('[data-testid="issue-row"]')).toHaveLength(250);
-      expect(container.textContent).toContain("Rendering 250 of 420 tasks");
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("waits for the desktop main scroll container before rendering more local rows", async () => {
-    const manyIssues = Array.from({ length: 120 }, (_, index) =>
-      createIssue({
-        id: `issue-${index + 1}`,
-        identifier: `PAP-${index + 1}`,
-        title: `Issue ${index + 1}`,
-      }),
-    );
-    const main = document.createElement("main");
-    main.id = "main-content";
-    main.style.overflowY = "auto";
-    document.body.appendChild(main);
-    main.appendChild(container);
-    Object.defineProperty(main, "clientHeight", { configurable: true, value: 600 });
-    Object.defineProperty(main, "scrollHeight", { configurable: true, value: 2000 });
-    Object.defineProperty(main, "scrollTop", { configurable: true, writable: true, value: 0 });
-    setDocumentScrollMetrics({ innerHeight: 600, scrollY: 0, scrollHeight: 600 });
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={manyIssues}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      expect(container.querySelectorAll('[data-testid="issue-row"]')).toHaveLength(100);
-    });
-
-    await flush();
-    await flush();
-    expect(container.querySelectorAll('[data-testid="issue-row"]')).toHaveLength(100);
-
-    act(() => {
-      main.scrollTop = 1500;
-      main.dispatchEvent(new Event("scroll"));
-    });
-    await flushAnimationFrame();
-
-    await waitForAssertion(() => {
-      expect(container.querySelectorAll('[data-testid="issue-row"]').length).toBeGreaterThan(100);
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("requests more server issues after scrolling past the rendered rows", async () => {
-    const visibleIssues = Array.from({ length: 100 }, (_, index) =>
-      createIssue({
-        id: `issue-${index + 1}`,
-        identifier: `PAP-${index + 1}`,
-        title: `Issue ${index + 1}`,
-      }),
-    );
-    const onLoadMoreIssues = vi.fn();
-    setDocumentScrollMetrics({ innerHeight: 2000, scrollY: 0, scrollHeight: 1000 });
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={visibleIssues}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        hasMoreIssues
-        onLoadMoreIssues={onLoadMoreIssues}
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      expect(container.querySelectorAll('[data-testid="issue-row"]')).toHaveLength(100);
-    });
-    await waitForAssertion(() => {
-      expect(onLoadMoreIssues).toHaveBeenCalledTimes(1);
-    });
-    await flush();
-    expect(onLoadMoreIssues).toHaveBeenCalledTimes(1);
-
-    act(() => {
-      setDocumentScrollMetrics({ innerHeight: 600, scrollY: 1500, scrollHeight: 2000 });
-      window.dispatchEvent(new Event("scroll"));
-    });
-    await flushAnimationFrame();
-
-    await waitForAssertion(() => {
-      expect(onLoadMoreIssues).toHaveBeenCalledTimes(2);
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("skips deferred row sizing for expanded parent rows with visible children", async () => {
-    const parentIssue = createIssue({
-      id: "issue-parent",
-      identifier: "PAP-1",
-      title: "Parent issue",
-    });
-    const childIssue = createIssue({
-      id: "issue-child",
-      identifier: "PAP-2",
-      title: "Child issue",
-      parentId: "issue-parent",
-    });
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[parentIssue, childIssue]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      const rows = Array.from(container.querySelectorAll('[data-testid="issue-row"]'));
-      const parentRow = rows.find((row) => row.textContent?.includes("Parent issue"));
-      const childRow = rows.find((row) => row.textContent?.includes("Child issue"));
-      expect(parentRow).not.toBeUndefined();
-      expect(childRow).not.toBeUndefined();
-      expect((parentRow?.parentElement as HTMLDivElement | null)?.style.contentVisibility).toBe("");
-      expect((parentRow?.parentElement as HTMLDivElement | null)?.style.containIntrinsicSize).toBe("");
-      expect((childRow?.parentElement as HTMLDivElement | null)?.style.contentVisibility).toBe("auto");
-      expect((childRow?.parentElement as HTMLDivElement | null)?.style.containIntrinsicSize).toBe("44px");
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("uses context-scoped persisted column visibility", async () => {
-    localStorage.setItem("paperclip:test-issues:company-1:issue-columns", JSON.stringify(["id", "assignee"]));
-
-    const assignedIssue = createIssue({
-      id: "issue-assigned",
-      identifier: "PAP-9",
-      title: "Assigned issue",
-      assigneeAgentId: "agent-1",
-    });
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[assignedIssue]}
-        agents={[{ id: "agent-1", name: "Agent One" }]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      const columnsButton = Array.from(document.body.querySelectorAll("button")).find(
-        (button) => button.getAttribute("title") === "Columns",
-      );
-      expect(columnsButton).not.toBeUndefined();
-      expect(container.textContent).toContain("PAP-9");
-      expect(container.textContent).toContain("Agent One");
-      expect(container.textContent).not.toContain("Updated");
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("shows human assignee names from company member profiles", async () => {
-    localStorage.setItem("paperclip:test-issues:company-1:issue-columns", JSON.stringify(["id", "assignee"]));
-    mockAccessApi.listUserDirectory.mockResolvedValue({
-      users: [
-        {
-          principalId: "user-2",
-          status: "active",
-          user: {
-            id: "user-2",
-            name: "Jordan Lee",
-            email: "jordan@example.com",
-            image: "https://example.com/jordan.png",
-          },
-        },
-      ],
-    });
-
-    const assignedIssue = createIssue({
-      id: "issue-human",
-      identifier: "PAP-12",
-      title: "Human assigned issue",
-      assigneeUserId: "user-2",
-    });
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[assignedIssue]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      expect(container.textContent).toContain("Jordan Lee");
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("preserves stored grouping across refresh when initial assignees are applied", async () => {
-    localStorage.setItem(
-      "paperclip:test-issues:company-1",
-      JSON.stringify({ groupBy: "status", sortField: "updated", sortDir: "desc" }),
-    );
-
-    const todoIssue = createIssue({ id: "issue-todo", title: "Alpha", status: "todo", assigneeAgentId: "agent-1" });
-    const doneIssue = createIssue({ id: "issue-done", title: "Beta", status: "done", assigneeAgentId: "agent-1" });
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[todoIssue, doneIssue]}
-        agents={[{ id: "agent-1", name: "Agent One" }]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        initialAssignees={["agent-1"]}
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      expect(container.textContent).toContain("Todo");
-      expect(container.textContent).toContain("Done");
-      expect(container.textContent).toContain("Alpha");
-      expect(container.textContent).toContain("Beta");
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("filters the list to a single workspace when a workspace name is clicked", async () => {
-    localStorage.setItem("paperclip:test-issues:company-1:issue-columns", JSON.stringify(["id", "workspace"]));
-    mockInstanceSettingsApi.getExperimental.mockResolvedValue({ enableIsolatedWorkspaces: true });
-    mockExecutionWorkspacesApi.listSummaries.mockResolvedValue([
-      {
-        id: "workspace-alpha",
-        name: "Alpha",
-        mode: "isolated_workspace",
-        status: "active",
-        projectWorkspaceId: null,
-      },
-      {
-        id: "workspace-beta",
-        name: "Beta",
-        mode: "isolated_workspace",
-        status: "active",
-        projectWorkspaceId: null,
-      },
-    ]);
-
-    const alphaIssue = createIssue({
-      id: "issue-alpha",
-      identifier: "PAP-20",
-      title: "Alpha issue",
-      executionWorkspaceId: "workspace-alpha",
-    });
-    const betaIssue = createIssue({
-      id: "issue-beta",
-      identifier: "PAP-21",
-      title: "Beta issue",
-      executionWorkspaceId: "workspace-beta",
-    });
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[alphaIssue, betaIssue]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      expect(container.textContent).toContain("Alpha issue");
-      expect(container.textContent).toContain("Beta issue");
-      const workspaceButton = Array.from(container.querySelectorAll("button")).find(
-        (button) => button.textContent === "Alpha",
-      );
-      expect(workspaceButton).not.toBeUndefined();
-    });
-
-    await act(async () => {
-      const workspaceButton = Array.from(container.querySelectorAll("button")).find(
-        (button) => button.textContent === "Alpha",
-      );
-      workspaceButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    await waitForAssertion(() => {
-      expect(container.textContent).toContain("Alpha issue");
-      expect(container.textContent).not.toContain("Beta issue");
     });
 
     act(() => {
@@ -2160,74 +1285,6 @@ describe("IssuesList", () => {
   // list and inbox standardize on md (16px). The live list always supplies its
   // own `statusSlot` (the PAP-246 slot-override gotcha), so assert the real
   // slot size here.
-  it("renders the desktop row status glyph at md (16px)", async () => {
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[createIssue({ status: "in_progress" })]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      const glyphs = Array.from(container.querySelectorAll("svg")).filter(
-        (svg) => svg.getAttribute("width") === "16" && svg.getAttribute("height") === "16",
-      );
-      expect(glyphs.length).toBeGreaterThan(0);
-      // No 20px (lg) status glyph should leak through from the list's slot.
-      const lgGlyphs = Array.from(container.querySelectorAll("svg")).filter(
-        (svg) => svg.getAttribute("width") === "20" && svg.getAttribute("height") === "20",
-      );
-      expect(lgGlyphs.length).toBe(0);
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("draws local-calendar separators between date-sorted rows", async () => {
-    const now = new Date();
-    const hourAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
-    const threeDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 3, 12);
-    const tenDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 10, 12);
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[
-          createIssue({ id: "issue-recent", identifier: "PAP-1", title: "Just updated", updatedAt: hourAgo }),
-          createIssue({ id: "issue-mid", identifier: "PAP-2", title: "A few days old", updatedAt: threeDaysAgo }),
-          createIssue({ id: "issue-old", identifier: "PAP-3", title: "Over a week old", updatedAt: tenDaysAgo }),
-        ]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        rowPresentation="task"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      const separators = Array.from(container.querySelectorAll("[data-issues-date-separator]"));
-      const labels = separators.map((el) => el.getAttribute("aria-label"));
-      expect(labels).toEqual(["Today", "Earlier"]);
-      expect(separators.every((separator) => (
-        separator.querySelectorAll("[data-date-group-rule]").length === 2
-      ))).toBe(true);
-      expect(separators.every((separator) => (
-        separator.querySelector("[data-date-group-label]")?.classList.contains("text-muted-foreground/70")
-      ))).toBe(true);
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
   it("can hide date group separators from the persisted Columns option", async () => {
     const collectionKey = "paperclip:test-issues";
     localStorage.setItem(
@@ -2272,107 +1329,6 @@ describe("IssuesList", () => {
     });
   });
 
-  it("does not synthesize an empty Yesterday group", async () => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
-    const tenDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 10, 12);
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[
-          createIssue({ id: "issue-recent", identifier: "PAP-1", title: "Just updated", updatedAt: today }),
-          createIssue({ id: "issue-old", identifier: "PAP-2", title: "Over a week old", updatedAt: tenDaysAgo }),
-        ]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        rowPresentation="task"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      const labels = Array.from(container.querySelectorAll("[data-issues-date-separator]"))
-        .map((el) => el.getAttribute("aria-label"));
-      expect(labels).toEqual(["Today", "Earlier"]);
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("places separators around expanded nested rows in visible order", async () => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
-    const threeDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 3, 12);
-    const tenDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 10, 12);
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[
-          createIssue({ id: "issue-parent", identifier: "PAP-1", title: "Recent parent", updatedAt: today }),
-          createIssue({ id: "issue-child", identifier: "PAP-2", parentId: "issue-parent", title: "Older child", updatedAt: threeDaysAgo }),
-          createIssue({ id: "issue-old", identifier: "PAP-3", title: "Old root", updatedAt: tenDaysAgo }),
-        ]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        rowPresentation="task"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      const visibleOrder = Array.from(
-        container.querySelectorAll("[data-testid='issue-row'], [data-issues-date-separator]"),
-      ).map((element) => element.getAttribute("aria-label") ?? element.firstElementChild?.textContent);
-      expect(visibleOrder).toEqual([
-        "Today",
-        "Recent parent",
-        "Earlier",
-        "Older child",
-        "Old root",
-      ]);
-    });
-
-    act(() => {
-      root.unmount();
-    });
-  });
-
-  it("emits one Today heading when all rows share today's calendar group", async () => {
-    const now = new Date();
-    const todayMorning = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9);
-    const todayNoon = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
-
-    const { root } = renderWithQueryClient(
-      <IssuesList
-        issues={[
-          createIssue({ id: "issue-a", identifier: "PAP-1", title: "One", updatedAt: todayNoon }),
-          createIssue({ id: "issue-b", identifier: "PAP-2", title: "Two", updatedAt: todayMorning }),
-        ]}
-        agents={[]}
-        projects={[]}
-        viewStateKey="paperclip:test-issues"
-        rowPresentation="task"
-        onUpdateIssue={() => undefined}
-      />,
-      container,
-    );
-
-    await waitForAssertion(() => {
-      expect(container.querySelector("[data-testid='issue-row']")).not.toBeNull();
-    });
-    expect(Array.from(container.querySelectorAll("[data-issues-date-separator]"))
-      .map((element) => element.getAttribute("aria-label"))).toEqual(["Today"]);
-
-    act(() => {
-      root.unmount();
-    });
-  });
 });
 
 describe("legacy issue age separators", () => {

@@ -1,12 +1,9 @@
-import { AgentIdentity } from "@/components/AgentIdentity";
 import { startTransition, useDeferredValue, useEffect, useMemo, useState, useCallback, useRef } from "react";
-import type { ReactNode } from "react";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { useVisibilityRefetchInterval } from "@/lib/polling";
-import { accessApi } from "../api/access";
 import { useDialogActions } from "../context/DialogContext";
 import { useCompany } from "../context/CompanyContext";
-import { Link, useNavigate } from "@/lib/router";
+import { Link } from "@/lib/router";
 import { executionWorkspacesApi } from "../api/execution-workspaces";
 import { issuesApi } from "../api/issues";
 import { authApi } from "../api/auth";
@@ -18,23 +15,18 @@ import {
   shouldBlurPageSearchOnEscape,
 } from "../lib/keyboardShortcuts";
 import { formatAssigneeUserLabel } from "../lib/assignees";
-import { buildCompanyUserLabelMap, buildCompanyUserProfileMap } from "../lib/company-members";
-import { createIssueDetailPath, rememberIssueDetailLocationState, withIssueDetailHeaderSeed } from "../lib/issueDetailBreadcrumb";
-import { prefetchIssueDetailForNavigation } from "../lib/issueDetailCache";
+import { createIssueDetailPath, withIssueDetailHeaderSeed } from "../lib/issueDetailBreadcrumb";
 import {
   buildSubIssueProgressSummary,
   shouldRenderSubIssueProgressSummary,
   type SubIssueProgressSummary,
 } from "../lib/issue-detail-subissues";
-import { groupBy } from "../lib/groupBy";
 import {
   applyIssueFilters,
   countActiveIssueFilters,
   defaultIssueFilterState,
-  issueFilterLabel,
   issuePriorityOrder,
   normalizeIssueFilterState,
-  resolveIssueFilterWorkspaceId,
   shouldIncludeIssueFilterWorkspaceOption,
   issueStatusOrder,
   type IssueFilterState,
@@ -43,26 +35,14 @@ import {
   DEFAULT_INBOX_ISSUE_COLUMNS,
   getAvailableInboxIssueColumns,
   normalizeInboxIssueColumns,
-  resolveIssueWorkspaceName,
   type InboxIssueColumn,
 } from "../lib/inbox";
 import { cn, formatDurationMs, formatTokens } from "../lib/utils";
-import { SHOW_TASK_PRIORITY_UI } from "../lib/ui-flags";
-import { collectSubtreeLiveCounts } from "../lib/liveIssueIds";
 import {
-  InboxIssueMetaLeading,
-  InboxIssueTrailingColumns,
   IssueColumnPicker,
-  issueActivityText,
-  issueActivityTimestamp,
-  issueTrailingColumns,
 } from "./IssueColumns";
-import { StatusIcon } from "./StatusIcon";
-import { EmptyState } from "./EmptyState";
-import { Identity } from "./Identity";
-import { IssueGroupHeader } from "./IssueGroupHeader";
 import { IssueFiltersPopover } from "./IssueFiltersPopover";
-import { IssueRow, type IssueRowPresentation } from "./IssueRow";
+import { type IssueRowPresentation } from "./IssueRow";
 import { CollectionToolbar, type CollectionToolbarProps } from "./CollectionToolbar";
 import { IssuesList as LegacyIssuesList } from "./LegacyIssuesList";
 import { useStreamlinedUiEnabled } from "../hooks/useStreamlinedUiEnabled";
@@ -70,68 +50,31 @@ import { PageSkeleton } from "./PageSkeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
-import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
-import { CircleDot, Plus, ArrowUpDown, Layers, Check, ChevronRight, List, ListTree, User, Search, CircleSlash2, ChevronsDownUp, PanelTopClose, RotateCcw, ListCollapse,
+import { Plus, Check, Search, ChevronsDownUp, PanelTopClose, RotateCcw, ListCollapse,
   Columns3, LayoutGrid,
 } from "lucide-react";
 import {
   KanbanBoard,
+  type KanbanLaneFold,
+  anyKanbanLaneOpen,
   KANBAN_BOARD_HIGH_VOLUME_THRESHOLD,
   KANBAN_COLD_STATUSES,
   KANBAN_COLUMN_DEFAULT_PAGE_SIZE,
   KANBAN_COLUMN_PAGE_SIZE_OPTIONS,
   type KanbanColumnPageSize,
 } from "./KanbanBoard";
-import { buildIssueTree, countDescendants } from "../lib/issue-tree";
-import { getInboxKeyboardSelectionIndex } from "../lib/inbox";
-import { hasBlockingShortcutDialog, isKeyboardShortcutTextInputTarget } from "../lib/keyboardShortcuts";
-import { useGeneralSettings } from "../context/GeneralSettingsContext";
 import { buildSubIssueDefaultsForViewer } from "../lib/subIssueDefaults";
-import { statusBadge } from "../lib/status-colors";
 import { workflowSort } from "../lib/workflow-sort";
-import { isSuccessfulRunHandoffRequired } from "../lib/successful-run-handoff";
 import {
   loadTaskCollectionPreferences,
   saveTaskCollectionPreferences,
   type TaskCollectionPreferenceLocation,
 } from "../lib/task-collection-preferences";
-import { taskDateGroup, taskDateGroupSeparator, type TaskDateGroup } from "../lib/task-date-groups";
-import { deriveOriginatingActor, ISSUE_STATUSES, type Issue, type IssueStatus, type Project } from "@paperclipai/shared";
-import { Badge } from "@/components/ui/badge";
+import { ISSUE_STATUSES, type Issue, type IssueStatus, type Project } from "@paperclipai/shared";
 const ISSUE_SEARCH_DEBOUNCE_MS = 250;
 const ISSUE_SEARCH_RESULT_LIMIT = 200;
 const ISSUE_BOARD_COLUMN_RESULT_LIMIT = 200;
-type IssuesListNavEntry =
-  | { type: "group"; key: string; collapsed: boolean }
-  | { type: "issue"; issue: Issue; hasChildren: boolean; expanded: boolean; budgetOrdinal: number };
 
-function issuesListNavEntryKey(entry: IssuesListNavEntry): string {
-  return entry.type === "group" ? `group:${entry.key}` : `issue:${entry.issue.id}`;
-}
-
-// CSS.escape is missing in some non-browser environments (jsdom tests).
-function escapeAttrValue(value: string): string {
-  return typeof CSS !== "undefined" && typeof CSS.escape === "function"
-    ? CSS.escape(value)
-    : value.replace(/["\\]/g, "\\$&");
-}
-
-const INITIAL_ISSUE_ROW_RENDER_LIMIT = 100;
-const ISSUE_ROW_RENDER_BATCH_SIZE = 150;
-const ISSUE_SCROLL_LOAD_THRESHOLD_PX = 320;
-
-function findIssuesScrollContainer(element: HTMLElement | null): HTMLElement | null {
-  if (!element || typeof window === "undefined") return null;
-  let current = element.parentElement;
-  while (current && current !== document.body && current !== document.documentElement) {
-    const overflowY = window.getComputedStyle(current).overflowY;
-    if (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") {
-      return current;
-    }
-    current = current.parentElement;
-  }
-  return null;
-}
 const boardIssueStatuses = ISSUE_STATUSES;
 const issueStatusLabels: Record<IssueStatus, string> = {
   backlog: "Backlog",
@@ -163,7 +106,7 @@ export type IssueViewState = IssueFilterState & {
   sortField: IssueSortField;
   sortDir: "asc" | "desc";
   groupBy: "status" | "priority" | "assignee" | "project" | "workspace" | "parent" | "none";
-  viewMode: "list" | "board" | "grid";
+  viewMode: "board" | "grid";
   nestingEnabled: boolean;
   showDateGroupSeparators: boolean;
   collapsedGroups: string[];
@@ -178,7 +121,7 @@ const defaultViewState: IssueViewState = {
   sortField: "updated",
   sortDir: "desc",
   groupBy: "none",
-  viewMode: "list",
+  viewMode: "board",
   nestingEnabled: true,
   showDateGroupSeparators: true,
   collapsedGroups: [],
@@ -215,7 +158,8 @@ function normalizeIssueViewState(value: unknown): IssueViewState {
     groupBy: ["status", "priority", "assignee", "project", "workspace", "parent", "none"].includes(parsed.groupBy ?? "")
       ? parsed.groupBy as IssueViewState["groupBy"]
       : defaultViewState.groupBy,
-    viewMode: parsed.viewMode === "board" || parsed.viewMode === "grid" ? parsed.viewMode : "list",
+    // A saved "list" (the removed List view) reads as "board".
+    viewMode: parsed.viewMode === "grid" ? "grid" : "board",
     nestingEnabled: parsed.nestingEnabled !== false,
     showDateGroupSeparators: parsed.showDateGroupSeparators !== false,
     collapsedGroups: Array.isArray(parsed.collapsedGroups)
@@ -303,15 +247,6 @@ function sortIssues(issues: Issue[], state: IssueViewState): Issue[] {
   return sorted;
 }
 
-// Only recency sorts (newest first) get date separators — for any other
-// sort/direction the boundaries would be meaningless.
-function issueDateSeparatorField(state: IssueViewState): "createdAt" | "updatedAt" | null {
-  if (state.sortDir !== "desc") return null;
-  if (state.sortField === "created") return "createdAt";
-  if (state.sortField === "updated") return "updatedAt";
-  return null;
-}
-
 const AGE_BUCKET_DAY_MS = 24 * 60 * 60 * 1000;
 const AGE_BUCKET_WEEK_MS = 7 * AGE_BUCKET_DAY_MS;
 
@@ -336,26 +271,6 @@ export function issueAgeBucketsCrossed(
   return crossedBuckets;
 }
 
-function IssueDateSeparator({ label }: { label: string }) {
-  return (
-    <div
-      className="flex items-center gap-3 px-3 py-1.5 sm:pl-0 sm:pr-4"
-      role="separator"
-      aria-label={label}
-      data-issues-date-separator=""
-    >
-      <span className="h-px min-w-0 flex-1 bg-border/80" aria-hidden="true" data-date-group-rule="" />
-      <span
-        className="shrink-0 text-(length:--text-nano) font-medium uppercase tracking-wider text-muted-foreground/70"
-        data-date-group-label=""
-      >
-        {label}
-      </span>
-      <span className="h-px min-w-0 flex-1 bg-border/80" aria-hidden="true" data-date-group-rule="" />
-    </div>
-  );
-}
-
 function issueMatchesLocalSearch(issue: Issue, normalizedSearch: string): boolean {
   if (!normalizedSearch) return true;
   return [
@@ -363,84 +278,6 @@ function issueMatchesLocalSearch(issue: Issue, normalizedSearch: string): boolea
     issue.title,
     issue.description,
   ].some((value) => value?.toLowerCase().includes(normalizedSearch));
-}
-
-function isActionableWorkflowStatus(status: IssueStatus): boolean {
-  return status !== "done" && status !== "cancelled" && status !== "blocked";
-}
-
-function buildChecklistStepNumberMap(issues: Issue[], nestingEnabled: boolean): Map<string, string> {
-  const stepNumberByIssueId = new Map<string, string>();
-
-  if (!nestingEnabled) {
-    issues.forEach((issue, index) => {
-      stepNumberByIssueId.set(issue.id, String(index + 1));
-    });
-    return stepNumberByIssueId;
-  }
-
-  const { roots, childMap } = buildIssueTree(issues);
-  const visit = (siblings: Issue[], prefix: string | null) => {
-    siblings.forEach((issue, index) => {
-      const stepNumber = prefix ? `${prefix}.${index + 1}` : String(index + 1);
-      stepNumberByIssueId.set(issue.id, stepNumber);
-      visit(childMap.get(issue.id) ?? [], stepNumber);
-    });
-  };
-  visit(roots, null);
-
-  issues.forEach((issue, index) => {
-    if (!stepNumberByIssueId.has(issue.id)) {
-      stepNumberByIssueId.set(issue.id, String(index + 1));
-    }
-  });
-
-  return stepNumberByIssueId;
-}
-
-function buildPreviousSiblingIssueIdMap(issues: Issue[], nestingEnabled: boolean): Map<string, string> {
-  const previousSiblingByIssueId = new Map<string, string>();
-
-  if (!nestingEnabled) {
-    const previousByParentId = new Map<string, Issue>();
-    for (const issue of issues) {
-      if (!issue.parentId) continue;
-      const previousSibling = previousByParentId.get(issue.parentId);
-      if (previousSibling) {
-        previousSiblingByIssueId.set(issue.id, previousSibling.id);
-      }
-      previousByParentId.set(issue.parentId, issue);
-    }
-    return previousSiblingByIssueId;
-  }
-
-  const { roots, childMap } = buildIssueTree(issues);
-  const visit = (siblings: Issue[]) => {
-    siblings.forEach((issue, index) => {
-      const previousSibling = index > 0 ? siblings[index - 1] : null;
-      if (issue.parentId && previousSibling?.parentId === issue.parentId) {
-        previousSiblingByIssueId.set(issue.id, previousSibling.id);
-      }
-      visit(childMap.get(issue.id) ?? []);
-    });
-  };
-  visit(roots);
-
-  return previousSiblingByIssueId;
-}
-
-function shouldSuppressSinglePreviousSiblingBlockerChip(
-  issue: Issue,
-  unresolvedVisibleBlockerIds: string[],
-  previousSiblingIssueId: string | undefined,
-): boolean {
-  return Boolean(
-    issue.parentId
-      && previousSiblingIssueId
-      && (issue.blockedBy ?? []).length === 1
-      && unresolvedVisibleBlockerIds.length === 1
-      && unresolvedVisibleBlockerIds[0] === previousSiblingIssueId,
-  );
 }
 
 /* ── Component ── */
@@ -691,9 +528,6 @@ function SubIssueProgressSummaryStrip({
   );
 }
 
-// Mobile-only indent for nested task rows (desktop uses IssueRow treeGuides).
-const MOBILE_TREE_INDENT = ["", "pl-4 sm:pl-0", "pl-8 sm:pl-0", "pl-12 sm:pl-0", "pl-16 sm:pl-0"];
-
 export function IssuesList(props: IssuesListProps) {
   const { enabled: streamlinedUiEnabled } = useStreamlinedUiEnabled();
   return streamlinedUiEnabled ? <StreamlinedIssuesList {...props} /> : <LegacyIssuesList {...props} />;
@@ -731,13 +565,6 @@ function StreamlinedIssuesList({
   onUpdateIssue,
 }: IssuesListProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const { keyboardShortcutsEnabled } = useGeneralSettings();
-  // Keyboard selection for the list view (mirrors the inbox). Hover moves the
-  // selection only after real pointer movement, so keyboard-driven scrolling
-  // doesn't hand the selection to whatever row lands under the cursor.
-  const [selectedNavKey, setSelectedNavKey] = useState<string | null>(null);
   const pointerMovedSinceKeyNavRef = useRef(true);
   useEffect(() => {
     const handlePointerMove = () => {
@@ -746,29 +573,11 @@ function StreamlinedIssuesList({
     window.addEventListener("mousemove", handlePointerMove, { passive: true });
     return () => window.removeEventListener("mousemove", handlePointerMove);
   }, []);
-  // Which entry the cursor is over, tracked WITHOUT React state so scrubbing the
-  // list costs zero re-renders (hover paints via CSS `:hover`). Keyboard nav
-  // reads this to continue from the hovered row. Key-based, so it self-heals if
-  // the entry disappears (findIndex → -1).
-  const hoveredNavKeyRef = useRef<string | null>(null);
-  const setNavSelectionFromPointer = useCallback((navKey: string) => {
-    if (!pointerMovedSinceKeyNavRef.current) return;
-    hoveredNavKeyRef.current = navKey;
-    // Drop any keyboard selection band the moment the mouse takes over, so we
-    // never show two identical highlights at once. React bails when already
-    // null, so continuous hovering triggers no re-render.
-    setSelectedNavKey((prev) => (prev === null ? prev : null));
-  }, []);
   const { selectedCompanyId } = useCompany();
   const { openNewIssue } = useDialogActions();
   const { data: session } = useQuery({
     queryKey: queryKeys.auth.session,
     queryFn: () => authApi.getSession(),
-  });
-  const { data: companyMembers } = useQuery({
-    queryKey: queryKeys.access.companyUserDirectory(selectedCompanyId!),
-    queryFn: () => accessApi.listUserDirectory(selectedCompanyId!),
-    enabled: !!selectedCompanyId,
   });
   const { data: experimentalSettings } = useQuery({
     queryKey: queryKeys.instance.experimentalSettings,
@@ -799,15 +608,9 @@ function StreamlinedIssuesList({
   const [viewState, setViewState] = useState<IssueViewState>(() =>
     getInitialWorkspaceViewState(initialPreferences, initialAssignees, initialWorkspaces, defaultSortField),
   );
-  // Board and Grid share the per-status data load and the board controls.
-  const isBoardView = viewState.viewMode !== "list";
-  const [assigneePickerIssueId, setAssigneePickerIssueId] = useState<string | null>(null);
-  const [assigneeSearch, setAssigneeSearch] = useState("");
+  const [laneFold, setLaneFold] = useState<KanbanLaneFold>({ all: null, lanes: {} });
   const [issueSearch, setIssueSearch] = useState(initialSearch ?? "");
-  const [renderedIssueRowLimit, setRenderedIssueRowLimit] = useState(INITIAL_ISSUE_ROW_RENDER_LIMIT);
   const [visibleIssueColumns, setVisibleIssueColumns] = useState<InboxIssueColumn[]>(initialPreferences.columns);
-  const renderedIssueIdsRef = useRef("");
-  const initialServerFillRequestedRef = useRef(false);
   const deferredIssueSearch = useDeferredValue(issueSearch);
   const normalizedIssueSearch = deferredIssueSearch.trim().toLowerCase();
 
@@ -913,7 +716,7 @@ function StreamlinedIssuesList({
           limit: ISSUE_BOARD_COLUMN_RESULT_LIMIT,
           ...(enableRoutineVisibilityFilter ? { includeRoutineExecutions: true } : {}),
         }, { signal }).then((rows) => rows as Issue[]),
-      enabled: !!selectedCompanyId && isBoardView && !searchWithinLoadedIssues,
+      enabled: !!selectedCompanyId && !searchWithinLoadedIssues,
       placeholderData: (previousData: Issue[] | undefined) => previousData,
     })),
   });
@@ -924,28 +727,6 @@ function StreamlinedIssuesList({
     queryFn: () => executionWorkspacesApi.listSummaries(selectedCompanyId!),
     enabled: !!selectedCompanyId && isolatedWorkspacesEnabled,
   });
-
-  const agentName = useCallback((id: string | null) => {
-    if (!id || !agents) return null;
-    return agents.find((a) => a.id === id)?.name ?? null;
-  }, [agents]);
-
-  const companyUserLabelMap = useMemo(
-    () => buildCompanyUserLabelMap(companyMembers?.users),
-    [companyMembers?.users],
-  );
-  const companyUserProfileMap = useMemo(
-    () => buildCompanyUserProfileMap(companyMembers?.users),
-    [companyMembers?.users],
-  );
-
-  const projectById = useMemo(() => {
-    const map = new Map<string, { name: string; color: string | null }>();
-    for (const project of projects ?? []) {
-      map.set(project.id, { name: project.name, color: project.color ?? null });
-    }
-    return map;
-  }, [projects]);
 
   const projectWorkspaceById = useMemo(() => {
     const map = new Map<string, { name: string; projectId: string }>();
@@ -1090,19 +871,6 @@ function StreamlinedIssuesList({
     () => getAvailableInboxIssueColumns(isolatedWorkspacesEnabled),
     [isolatedWorkspacesEnabled],
   );
-  const availableIssueColumnSet = useMemo(() => new Set(availableIssueColumns), [availableIssueColumns]);
-  const subtreeLiveCounts = useMemo(
-    () => collectSubtreeLiveCounts(issues, liveIssueIds ?? new Set<string>()),
-    [issues, liveIssueIds],
-  );
-  const visibleTrailingIssueColumns = useMemo(
-    () => issueTrailingColumns.filter((column) =>
-      visibleIssueColumnSet.has(column)
-      && availableIssueColumnSet.has(column)
-      && (rowPresentation === "legacy" || column !== "updated"),
-    ),
-    [availableIssueColumnSet, rowPresentation, visibleIssueColumnSet],
-  );
 
   const issueById = useMemo(() => {
     const map = new Map<string, Issue>();
@@ -1112,16 +880,8 @@ function StreamlinedIssuesList({
     return map;
   }, [issues]);
 
-  const issueTitleMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const issue of issues) {
-      map.set(issue.id, issue.identifier ? `${issue.identifier}: ${issue.title}` : issue.title);
-    }
-    return map;
-  }, [issues]);
-
   const boardIssues = useMemo(() => {
-    if (!isBoardView || searchWithinLoadedIssues) return null;
+    if (searchWithinLoadedIssues) return null;
     const merged = new Map<string, Issue>();
     let isPending = false;
     for (const query of boardIssueQueries) {
@@ -1132,13 +892,12 @@ function StreamlinedIssuesList({
     }
     if (merged.size > 0) return [...merged.values()];
     return isPending ? issues : [];
-  }, [boardIssueQueries, issues, isBoardView, searchWithinLoadedIssues]);
+  }, [boardIssueQueries, issues, searchWithinLoadedIssues]);
   const boardColumnLimitReached = useMemo(
     () =>
-      isBoardView &&
       !searchWithinLoadedIssues &&
       boardIssueQueries.some((query) => (query.data?.length ?? 0) === ISSUE_BOARD_COLUMN_RESULT_LIMIT),
-    [boardIssueQueries, isBoardView, searchWithinLoadedIssues],
+    [boardIssueQueries, searchWithinLoadedIssues],
   );
 
   const sourceIssues = useMemo(() => {
@@ -1154,10 +913,10 @@ function StreamlinedIssuesList({
   );
   const hasExternalObjectStatusFilters = viewState.externalObjectStatuses.length > 0;
   const issueIdsForExternalObjectSummaries = useMemo(
-    () => (viewState.viewMode === "list" || hasExternalObjectStatusFilters
+    () => (hasExternalObjectStatusFilters
       ? searchScopedIssues.map((issue) => issue.id)
       : []),
-    [hasExternalObjectStatusFilters, searchScopedIssues, viewState.viewMode],
+    [hasExternalObjectStatusFilters, searchScopedIssues],
   );
   const {
     summaries: externalObjectSummaryByIssueId,
@@ -1201,46 +960,6 @@ function StreamlinedIssuesList({
       : null,
     [issues, showProgressSummary],
   );
-  const checklistAffordanceEnabled = useMemo(
-    () =>
-      defaultSortField === "workflow"
-      && viewState.groupBy === "none",
-    [defaultSortField, viewState.groupBy],
-  );
-  const workflowChecklistMeta = useMemo(() => {
-    if (!checklistAffordanceEnabled) return null;
-
-    const visibleIssueIds = new Set(filtered.map((issue) => issue.id));
-    const stepNumberByIssueId = buildChecklistStepNumberMap(filtered, viewState.nestingEnabled);
-    const previousSiblingIssueIdByIssueId = buildPreviousSiblingIssueIdMap(filtered, viewState.nestingEnabled);
-    const unresolvedVisibleBlockersByIssueId = new Map<string, string[]>();
-
-    filtered.forEach((issue) => {
-      const unresolvedVisible = (issue.blockedBy ?? [])
-        .map((blocker) => blocker.id)
-        .filter((blockerId) => {
-          if (!visibleIssueIds.has(blockerId)) return false;
-          const blockerIssue = issueById.get(blockerId);
-          if (!blockerIssue) return false;
-          return blockerIssue.status !== "done" && blockerIssue.status !== "cancelled";
-        });
-      const shouldSuppressChip = shouldSuppressSinglePreviousSiblingBlockerChip(
-        issue,
-        unresolvedVisible,
-        previousSiblingIssueIdByIssueId.get(issue.id),
-      );
-      unresolvedVisibleBlockersByIssueId.set(issue.id, shouldSuppressChip ? [] : unresolvedVisible);
-    });
-
-    const firstActionable = filtered.find((issue) => isActionableWorkflowStatus(issue.status)) ?? null;
-    const currentStepIssue = firstActionable ?? filtered.find((issue) => issue.status === "blocked") ?? null;
-
-    return {
-      stepNumberByIssueId,
-      unresolvedVisibleBlockersByIssueId,
-      currentStepIssueId: currentStepIssue?.id ?? null,
-    };
-  }, [checklistAffordanceEnabled, filtered, issueById, viewState.nestingEnabled]);
 
   const { data: labels } = useQuery({
     queryKey: queryKeys.issues.labels(selectedCompanyId!),
@@ -1249,7 +968,12 @@ function StreamlinedIssuesList({
   });
 
   const activeFilterCount = countActiveIssueFilters(viewState, enableRoutineVisibilityFilter);
-  const boardHighVolume = isBoardView && filtered.length > KANBAN_BOARD_HIGH_VOLUME_THRESHOLD;
+  const boardHighVolume = filtered.length > KANBAN_BOARD_HIGH_VOLUME_THRESHOLD;
+  const boardLayout = viewState.viewMode === "grid" ? "grid" : "board";
+  const anyLaneOpen = useMemo(
+    () => anyKanbanLaneOpen(filtered, laneFold, boardLayout),
+    [filtered, laneFold, boardLayout],
+  );
   const boardCompactCards =
     viewState.boardCardDensity === "compact"
     || (viewState.boardCardDensity === "auto" && boardHighVolume);
@@ -1265,363 +989,6 @@ function StreamlinedIssuesList({
     viewState.boardCardDensity !== "auto"
     || viewState.boardColdLaneMode !== "auto"
     || viewState.boardColumnPageSize !== KANBAN_COLUMN_DEFAULT_PAGE_SIZE;
-
-  const groupedContent = useMemo(() => {
-    if (viewState.groupBy === "none") {
-      return [{ key: "__all", label: null as string | null, items: filtered }];
-    }
-    if (viewState.groupBy === "status") {
-      const groups = groupBy(filtered, (i) => i.status);
-      return issueStatusOrder
-        .filter((s) => groups[s]?.length)
-        .map((s) => ({ key: s, label: issueFilterLabel(s), items: groups[s]! }));
-    }
-    if (viewState.groupBy === "priority") {
-      const groups = groupBy(filtered, (i) => i.priority);
-      return issuePriorityOrder
-        .filter((p) => groups[p]?.length)
-        .map((p) => ({ key: p, label: issueFilterLabel(p), items: groups[p]! }));
-    }
-    if (viewState.groupBy === "workspace") {
-      const groups = groupBy(
-        filtered,
-        (issue) => resolveIssueFilterWorkspaceId(issue, issueFilterWorkspaceContext) ?? "__no_workspace",
-      );
-      return Object.keys(groups)
-        .sort((a, b) => {
-          // Groups with items first, "no workspace" last
-          if (a === "__no_workspace") return 1;
-          if (b === "__no_workspace") return -1;
-          return (groups[b]?.length ?? 0) - (groups[a]?.length ?? 0);
-        })
-        .map((key) => ({
-          key,
-          label: key === "__no_workspace" ? "No Workspace" : (workspaceNameMap.get(key) ?? key.slice(0, 8)),
-          items: groups[key]!,
-        }));
-    }
-    if (viewState.groupBy === "project") {
-      const groups = groupBy(filtered, (issue) => issue.projectId ?? "__no_project");
-      return Object.keys(groups)
-        .sort((a, b) => {
-          if (a === "__no_project") return 1;
-          if (b === "__no_project") return -1;
-          const labelA = projectById.get(a)?.name ?? a;
-          const labelB = projectById.get(b)?.name ?? b;
-          return labelA.localeCompare(labelB);
-        })
-        .map((key) => ({
-          key,
-          label: key === "__no_project" ? "No Project" : (projectById.get(key)?.name ?? key.slice(0, 8)),
-          items: groups[key]!,
-        }));
-    }
-    if (viewState.groupBy === "parent") {
-      const groups = groupBy(filtered, (i) => i.parentId ?? "__no_parent");
-      return Object.keys(groups)
-        .sort((a, b) => {
-          // Groups with items first, "no parent" last
-          if (a === "__no_parent") return 1;
-          if (b === "__no_parent") return -1;
-          return (groups[b]?.length ?? 0) - (groups[a]?.length ?? 0);
-        })
-        .map((key) => ({
-          key,
-          label: key === "__no_parent" ? "No Parent" : (issueTitleMap.get(key) ?? key.slice(0, 8)),
-          items: groups[key]!,
-        }));
-    }
-    // assignee
-    const groups = groupBy(
-      filtered,
-      (issue) => issue.assigneeAgentId ?? (issue.assigneeUserId ? `__user:${issue.assigneeUserId}` : "__unassigned"),
-    );
-    return Object.keys(groups).map((key) => ({
-      key,
-      label:
-        key === "__unassigned"
-          ? "Unassigned"
-          : key.startsWith("__user:")
-            ? (formatAssigneeUserLabel(key.slice("__user:".length), currentUserId, companyUserLabelMap) ?? "User")
-            : (agentName(key) ?? key.slice(0, 8)),
-      items: groups[key]!,
-    }));
-  }, [
-    filtered,
-    issueFilterWorkspaceContext,
-    viewState.groupBy,
-    agents,
-    agentName,
-    currentUserId,
-    workspaceNameMap,
-    issueTitleMap,
-    companyUserLabelMap,
-    projectById,
-  ]);
-
-  // Flattened visible order (group headers, then tree DFS per group —
-  // collapsed groups keep their header entry but skip their rows) — must
-  // match render order below for keyboard traversal. `budgetOrdinal` counts
-  // rows the way the progressive renderer consumes its budget (collapsed
-  // groups still consume rows; collapsed parents' subtrees do not).
-  const flatNavEntries = useMemo(() => {
-    if (viewState.viewMode !== "list") return [] as IssuesListNavEntry[];
-    const out: IssuesListNavEntry[] = [];
-    let budgetCount = 0;
-    for (const group of groupedContent) {
-      const collapsed = Boolean(group.label) && viewState.collapsedGroups.includes(group.key);
-      if (group.label) out.push({ type: "group", key: group.key, collapsed });
-      const { roots, childMap } = viewState.nestingEnabled
-        ? buildIssueTree(group.items)
-        : { roots: group.items, childMap: new Map<string, Issue[]>() };
-      const walk = (issue: Issue) => {
-        budgetCount += 1;
-        const children = childMap.get(issue.id) ?? [];
-        const expanded = !viewState.collapsedParents.includes(issue.id);
-        if (!collapsed) {
-          out.push({
-            type: "issue",
-            issue,
-            hasChildren: children.length > 0,
-            expanded,
-            budgetOrdinal: budgetCount,
-          });
-        }
-        if (expanded) for (const child of children) walk(child);
-      };
-      for (const root of roots) walk(root);
-    }
-    return out;
-  }, [
-    groupedContent,
-    viewState.viewMode,
-    viewState.collapsedGroups,
-    viewState.collapsedParents,
-    viewState.nestingEnabled,
-  ]);
-
-  const listNavStateRef = useRef({
-    flatNavEntries,
-    selectedNavKey,
-    viewMode: viewState.viewMode,
-    issueLinkState,
-    collapsedGroups: viewState.collapsedGroups,
-    collapsedParents: viewState.collapsedParents,
-    updateView,
-  });
-  listNavStateRef.current = {
-    flatNavEntries,
-    selectedNavKey,
-    viewMode: viewState.viewMode,
-    issueLinkState,
-    collapsedGroups: viewState.collapsedGroups,
-    collapsedParents: viewState.collapsedParents,
-    updateView,
-  };
-
-  const findSelectedNavElement = useCallback((navKey: string) => {
-    if (navKey.startsWith("group:")) {
-      const header = rootRef.current?.querySelector(
-        `[data-issues-group-key="${escapeAttrValue(navKey.slice("group:".length))}"]`,
-      );
-      return header instanceof HTMLElement ? header : null;
-    }
-    const row = rootRef.current?.querySelector(
-      `[data-issue-row-id="${escapeAttrValue(navKey.slice("issue:".length))}"]`,
-    );
-    const link = row?.querySelector("[data-inbox-issue-link]");
-    return link instanceof HTMLElement ? link : null;
-  }, []);
-
-  useEffect(() => {
-    if (!keyboardShortcutsEnabled) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
-      const target = e.target;
-      if (
-        !(target instanceof HTMLElement) ||
-        isKeyboardShortcutTextInputTarget(target) ||
-        hasBlockingShortcutDialog(document) ||
-        e.metaKey ||
-        e.ctrlKey ||
-        e.altKey
-      ) {
-        return;
-      }
-      const st = listNavStateRef.current;
-      if (st.viewMode !== "list" || st.flatNavEntries.length === 0) return;
-      // The row a keystroke acts on: the hovered row when the mouse moved since
-      // the last key nav (so "hover a row → press Arrow/Enter" acts on it),
-      // otherwise the keyboard selection. Hover no longer writes selection
-      // state, so this threads the pointer position into every handler.
-      const indexOfKey = (key: string | null) =>
-        key ? st.flatNavEntries.findIndex((entry) => issuesListNavEntryKey(entry) === key) : -1;
-      const hoveredIndex = indexOfKey(hoveredNavKeyRef.current);
-      const fromHover = pointerMovedSinceKeyNavRef.current && hoveredIndex >= 0;
-      const currentIndex = fromHover ? hoveredIndex : indexOfKey(st.selectedNavKey);
-      switch (e.key) {
-        case "j":
-        case "ArrowDown":
-        case "k":
-        case "ArrowUp": {
-          e.preventDefault();
-          pointerMovedSinceKeyNavRef.current = false;
-          const direction = e.key === "j" || e.key === "ArrowDown" ? "next" : "previous";
-          const nextIndex = getInboxKeyboardSelectionIndex(currentIndex, st.flatNavEntries.length, direction);
-          const nextEntry = st.flatNavEntries[nextIndex];
-          if (!nextEntry) break;
-          setSelectedNavKey(issuesListNavEntryKey(nextEntry));
-          // The list renders progressively; make sure the selected row is
-          // within the render budget so the band mounts and can scroll into
-          // view (the +1 keeps the next row visible as a scroll cue).
-          if (nextEntry.type === "issue") {
-            setRenderedIssueRowLimit((current) => Math.max(current, nextEntry.budgetOrdinal + 1));
-          }
-          break;
-        }
-        case "ArrowLeft":
-        case "ArrowRight": {
-          // Groups and parent tasks collapse/expand with the same keys as the
-          // inbox.
-          const entry = st.flatNavEntries[currentIndex];
-          if (!entry) return;
-          const collapse = e.key === "ArrowLeft";
-          if (entry.type === "group") {
-            e.preventDefault();
-            pointerMovedSinceKeyNavRef.current = false;
-            setSelectedNavKey(issuesListNavEntryKey(entry));
-            st.updateView({
-              collapsedGroups: collapse
-                ? (st.collapsedGroups.includes(entry.key) ? st.collapsedGroups : [...st.collapsedGroups, entry.key])
-                : st.collapsedGroups.filter((k) => k !== entry.key),
-            });
-            break;
-          }
-          if (!entry.hasChildren) return;
-          e.preventDefault();
-          pointerMovedSinceKeyNavRef.current = false;
-          setSelectedNavKey(issuesListNavEntryKey(entry));
-          st.updateView({
-            collapsedParents: collapse
-              ? (st.collapsedParents.includes(entry.issue.id) ? st.collapsedParents : [...st.collapsedParents, entry.issue.id])
-              : st.collapsedParents.filter((id) => id !== entry.issue.id),
-          });
-          break;
-        }
-        case "Enter": {
-          const entry = st.flatNavEntries[currentIndex];
-          if (!entry || entry.type !== "issue") return;
-          e.preventDefault();
-          // Navigate from the entry data (like the inbox) rather than the DOM
-          // row — the selected row may sit past the mounted render batch.
-          const issue = entry.issue;
-          const pathId = issue.identifier ?? issue.id;
-          const detailState = withIssueDetailHeaderSeed(st.issueLinkState, issue);
-          rememberIssueDetailLocationState(pathId, detailState);
-          // Seed the full list-row snapshot + first comments page before we
-          // navigate so keyboard-driven opens paint from cache instantly, the
-          // same way pointer hover/click does through the issue link. Mirrors
-          // the inbox Enter handler.
-          void prefetchIssueDetailForNavigation(queryClient, pathId, { issue });
-          navigate(createIssueDetailPath(pathId), { state: detailState });
-          break;
-        }
-        default:
-          return;
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [keyboardShortcutsEnabled, navigate, queryClient]);
-
-  // Keep the keyboard selection visible while navigating. Depends on the
-  // render budget too: a selection past the mounted batch scrolls once its
-  // row mounts.
-  useEffect(() => {
-    if (!selectedNavKey) return;
-    findSelectedNavElement(selectedNavKey)?.scrollIntoView({ block: "nearest" });
-  }, [findSelectedNavElement, renderedIssueRowLimit, selectedNavKey]);
-
-  useEffect(() => {
-    if (viewState.viewMode !== "list") return;
-    const nextIssueIds = filtered.map((issue) => issue.id).join("|");
-    const previousIssueIds = renderedIssueIdsRef.current;
-    renderedIssueIdsRef.current = nextIssueIds;
-
-    setRenderedIssueRowLimit((current) => {
-      const nextInitialLimit = Math.min(filtered.length, INITIAL_ISSUE_ROW_RENDER_LIMIT);
-      const listAppended = previousIssueIds.length > 0
-        && nextIssueIds.startsWith(previousIssueIds)
-        && filtered.length >= current;
-      if (listAppended) return Math.min(filtered.length, Math.max(current, nextInitialLimit));
-      return nextInitialLimit;
-    });
-  }, [filtered, viewState.viewMode]);
-
-  const hasMoreRenderedRows = viewState.viewMode === "list" && renderedIssueRowLimit < filtered.length;
-  const remainingIssueRowCount = Math.max(filtered.length - renderedIssueRowLimit, 0);
-  const loadMoreIssueRows = useCallback(() => {
-    if (viewState.viewMode !== "list") return;
-    if (hasMoreRenderedRows) {
-      setRenderedIssueRowLimit((current) => Math.min(filtered.length, current + ISSUE_ROW_RENDER_BATCH_SIZE));
-      return;
-    }
-    if (hasMoreIssues && !isLoadingMoreIssues) {
-      onLoadMoreIssues?.();
-    }
-  }, [
-    filtered.length,
-    hasMoreIssues,
-    hasMoreRenderedRows,
-    isLoadingMoreIssues,
-    onLoadMoreIssues,
-    viewState.viewMode,
-  ]);
-
-  const canLoadMoreIssues = viewState.viewMode === "list"
-    && !isLoading
-    && (hasMoreRenderedRows || (hasMoreIssues && !isLoadingMoreIssues));
-
-  useEffect(() => {
-    if (!canLoadMoreIssues) return;
-    let animationFrameId: number | null = null;
-    const scrollContainer = findIssuesScrollContainer(rootRef.current);
-    const scrollTarget: Window | HTMLElement = scrollContainer ?? window;
-
-    const checkScrollPosition = (trigger: "initial" | "scroll" | "resize" = "scroll") => {
-      if (animationFrameId !== null) return;
-      animationFrameId = window.requestAnimationFrame(() => {
-        animationFrameId = null;
-        const scrollHeight = scrollContainer?.scrollHeight ?? document.documentElement.scrollHeight;
-        if (scrollHeight === 0) return;
-        const viewportHeight = scrollContainer?.clientHeight ?? window.innerHeight;
-        const scrollBottom = scrollContainer
-          ? scrollContainer.scrollTop + scrollContainer.clientHeight
-          : window.scrollY + window.innerHeight;
-        const hasScrollableOverflow = scrollHeight > viewportHeight + 1;
-        const threshold = scrollHeight - ISSUE_SCROLL_LOAD_THRESHOLD_PX;
-        if (scrollBottom >= threshold) {
-          if (trigger === "initial" && !hasMoreRenderedRows && hasMoreIssues && !hasScrollableOverflow) {
-            if (initialServerFillRequestedRef.current) return;
-            initialServerFillRequestedRef.current = true;
-          }
-          loadMoreIssueRows();
-        }
-      });
-    };
-
-    const handleScroll = () => checkScrollPosition("scroll");
-    const handleResize = () => checkScrollPosition("resize");
-    scrollTarget.addEventListener("scroll", handleScroll, { passive: true });
-    window.addEventListener("resize", handleResize);
-    checkScrollPosition("initial");
-
-    return () => {
-      scrollTarget.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("resize", handleResize);
-      if (animationFrameId !== null) window.cancelAnimationFrame(animationFrameId);
-    };
-  }, [canLoadMoreIssues, hasMoreIssues, hasMoreRenderedRows, loadMoreIssueRows]);
 
   const newIssueDefaults = useCallback((group?: { key: string; items: Issue[] }) => {
     const groupKey = group?.key;
@@ -1675,15 +1042,10 @@ function StreamlinedIssuesList({
     viewState.groupBy,
   ]);
 
-  const createActionLabel = createIssueLabel ? `Create ${createIssueLabel}` : "Create Task";
   const createButtonLabel = createIssueLabel ? `New ${createIssueLabel}` : "New Task";
   const openCreateIssueDialog = useCallback((group?: { key: string; items: Issue[] }) => {
     openNewIssue(newIssueDefaults(group));
   }, [newIssueDefaults, openNewIssue]);
-
-  const filterToWorkspace = useCallback((workspaceId: string) => {
-    updateView({ workspaces: [workspaceId] });
-  }, [updateView]);
 
   const setIssueColumns = useCallback((next: InboxIssueColumn[]) => {
     const normalized = normalizeInboxIssueColumns(next);
@@ -1708,13 +1070,6 @@ function StreamlinedIssuesList({
     setIssueColumns(visibleIssueColumns.filter((value) => value !== column));
   }, [setIssueColumns, visibleIssueColumns]);
 
-  const assignIssue = useCallback((issueId: string, assigneeAgentId: string | null, assigneeUserId: string | null = null) => {
-    onUpdateIssue(issueId, { assigneeAgentId, assigneeUserId });
-    setAssigneePickerIssueId(null);
-    setAssigneeSearch("");
-  }, [onUpdateIssue]);
-
-  let remainingRowsToRender = viewState.viewMode === "list" ? renderedIssueRowLimit : Number.POSITIVE_INFINITY;
   const IssuesToolbar = toolbarPresentation === "collection" ? CollectionToolbar : LegacyIssuesToolbar;
 
   return (
@@ -1751,7 +1106,6 @@ function StreamlinedIssuesList({
           {/* View mode toggle */}
           <div className="flex items-center border border-border rounded-md overflow-hidden mr-1" role="group" aria-label="View mode">
             {([
-              ["list", "List", List],
               ["board", "Board", Columns3],
               ["grid", "Grid", LayoutGrid],
             ] as const).map(([mode, label, Icon]) => (
@@ -1768,95 +1122,87 @@ function StreamlinedIssuesList({
             ))}
           </div>
 
-          {viewState.viewMode === "list" && (
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              className={cn("hidden h-8 w-8 shrink-0 sm:inline-flex", viewState.nestingEnabled && "bg-accent")}
-              onClick={() => updateView({ nestingEnabled: !viewState.nestingEnabled })}
-              title={viewState.nestingEnabled ? "Disable parent-child nesting" : "Enable parent-child nesting"}
-            >
-              <ListTree className="h-3.5 w-3.5" />
-            </Button>
-          )}
-
-          {isBoardView && (
-            <>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0 px-2 text-xs"
+            onClick={() => setLaneFold({ all: !anyLaneOpen, lanes: {} })}
+          >
+            {anyLaneOpen ? "Collapse all" : "Expand all"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className={cn("h-8 w-8 shrink-0", boardCompactCards && "bg-accent")}
+            onClick={() => updateView({ boardCardDensity: boardCompactCards ? "comfortable" : "compact" })}
+            title={boardCompactCards ? "Use comfortable cards" : "Use compact cards"}
+          >
+            <ChevronsDownUp className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className={cn("h-8 w-8 shrink-0", boardCollapsedStatuses.length > 0 && "bg-accent")}
+            onClick={() => updateView({ boardColdLaneMode: boardCollapsedStatuses.length > 0 ? "expanded" : "collapsed" })}
+            title={boardCollapsedStatuses.length > 0 ? "Expand cold lanes" : "Collapse cold lanes"}
+          >
+            <PanelTopClose className="h-3.5 w-3.5" />
+          </Button>
+          <Popover>
+            <PopoverTrigger asChild>
               <Button
                 type="button"
                 variant="outline"
-                size="icon"
-                className={cn("h-8 w-8 shrink-0", boardCompactCards && "bg-accent")}
-                onClick={() => updateView({ boardCardDensity: boardCompactCards ? "comfortable" : "compact" })}
-                title={boardCompactCards ? "Use comfortable cards" : "Use compact cards"}
+                size="sm"
+                className={cn(
+                  "h-8 shrink-0 gap-1.5 px-2",
+                  viewState.boardColumnPageSize !== KANBAN_COLUMN_DEFAULT_PAGE_SIZE && "bg-accent",
+                )}
+                title="Cards per column"
               >
-                <ChevronsDownUp className="h-3.5 w-3.5" />
+                <ListCollapse className="h-3.5 w-3.5" />
+                <span className="min-w-4 text-xs tabular-nums">{viewState.boardColumnPageSize}</span>
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className={cn("h-8 w-8 shrink-0", boardCollapsedStatuses.length > 0 && "bg-accent")}
-                onClick={() => updateView({ boardColdLaneMode: boardCollapsedStatuses.length > 0 ? "expanded" : "collapsed" })}
-                title={boardCollapsedStatuses.length > 0 ? "Expand cold lanes" : "Collapse cold lanes"}
-              >
-                <PanelTopClose className="h-3.5 w-3.5" />
-              </Button>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
+            </PopoverTrigger>
+            <PopoverContent align="end" className="w-40 p-0">
+              <div className="p-2 space-y-0.5">
+                {KANBAN_COLUMN_PAGE_SIZE_OPTIONS.map((pageSize) => (
+                  <button
+                    key={pageSize}
                     type="button"
-                    variant="outline"
-                    size="sm"
                     className={cn(
-                      "h-8 shrink-0 gap-1.5 px-2",
-                      viewState.boardColumnPageSize !== KANBAN_COLUMN_DEFAULT_PAGE_SIZE && "bg-accent",
+                      "flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-sm",
+                      viewState.boardColumnPageSize === pageSize
+                        ? "bg-accent/50 text-foreground"
+                        : "text-muted-foreground hover:bg-accent/50",
                     )}
-                    title="Cards per column"
+                    onClick={() => updateView({ boardColumnPageSize: pageSize })}
                   >
-                    <ListCollapse className="h-3.5 w-3.5" />
-                    <span className="min-w-4 text-xs tabular-nums">{viewState.boardColumnPageSize}</span>
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent align="end" className="w-40 p-0">
-                  <div className="p-2 space-y-0.5">
-                    {KANBAN_COLUMN_PAGE_SIZE_OPTIONS.map((pageSize) => (
-                      <button
-                        key={pageSize}
-                        type="button"
-                        className={cn(
-                          "flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-sm",
-                          viewState.boardColumnPageSize === pageSize
-                            ? "bg-accent/50 text-foreground"
-                            : "text-muted-foreground hover:bg-accent/50",
-                        )}
-                        onClick={() => updateView({ boardColumnPageSize: pageSize })}
-                      >
-                        <span>{pageSize} per column</span>
-                        {viewState.boardColumnPageSize === pageSize && <Check className="h-3.5 w-3.5" />}
-                      </button>
-                    ))}
-                  </div>
-                </PopoverContent>
-              </Popover>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-8 w-8 shrink-0"
-                onClick={() => updateView({
-                  boardCardDensity: "auto",
-                  boardColdLaneMode: "expanded",
-                  boardColumnPageSize: KANBAN_COLUMN_DEFAULT_PAGE_SIZE,
-                })}
-                disabled={!boardDensityCustomized}
-                title="Reset board density"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-              </Button>
-            </>
-          )}
+                    <span>{pageSize} per column</span>
+                    {viewState.boardColumnPageSize === pageSize && <Check className="h-3.5 w-3.5" />}
+                  </button>
+                ))}
+              </div>
+            </PopoverContent>
+          </Popover>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            onClick={() => updateView({
+              boardCardDensity: "auto",
+              boardColdLaneMode: "expanded",
+              boardColumnPageSize: KANBAN_COLUMN_DEFAULT_PAGE_SIZE,
+            })}
+            disabled={!boardDensityCustomized}
+            title="Reset board density"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </Button>
 
           <IssueColumnPicker
             availableColumns={availableIssueColumns}
@@ -1887,90 +1233,6 @@ function StreamlinedIssuesList({
             presentation={rowPresentation === "task" ? "streamlined" : "legacy"}
           />
 
-          {/* Sort (list view only) */}
-          {viewState.viewMode === "list" && (
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" title="Sort">
-                  <ArrowUpDown className="h-3.5 w-3.5" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-48 p-0">
-                <div className="p-2 space-y-0.5">
-                  {/* PAP-411: "priority" sort option hidden behind SHOW_TASK_PRIORITY_UI (comparator stays dormant). */}
-                  {([
-                    ["workflow", "Workflow"],
-                    ["status", "Status"],
-                    ["priority", "Priority"],
-                    ["title", "Title"],
-                    ["created", "Created"],
-                    ["updated", "Updated"],
-                  ] as const)
-                    .filter(([field]) => SHOW_TASK_PRIORITY_UI || field !== "priority")
-                    .map(([field, label]) => (
-                    <button
-                      key={field}
-                      className={`flex items-center justify-between w-full px-2 py-1.5 text-sm rounded-sm ${
-                        viewState.sortField === field ? "bg-accent/50 text-foreground" : "hover:bg-accent/50 text-muted-foreground"
-                      }`}
-                      onClick={() => {
-                        if (viewState.sortField === field) {
-                          updateView({ sortDir: viewState.sortDir === "asc" ? "desc" : "asc" });
-                        } else {
-                          updateView({ sortField: field, sortDir: "asc" });
-                        }
-                      }}
-                    >
-                      <span>{label}</span>
-                      {viewState.sortField === field && (
-                        <span className="text-xs text-muted-foreground">
-                          {viewState.sortDir === "asc" ? "\u2191" : "\u2193"}
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              </PopoverContent>
-            </Popover>
-          )}
-
-          {/* Group (list view only) */}
-          {viewState.viewMode === "list" && (
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button variant="outline" size="icon" className="h-8 w-8 shrink-0" title="Group">
-                  <Layers className="h-3.5 w-3.5" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="end" className="w-44 p-0">
-                <div className="p-2 space-y-0.5">
-                  {/* PAP-411: "priority" group-by option hidden behind SHOW_TASK_PRIORITY_UI (group logic stays dormant). */}
-                  {([
-                    ["status", "Status"],
-                    ["priority", "Priority"],
-                    ["assignee", "Responsible"],
-                    ["project", "Project"],
-                    ["workspace", "Workspace"],
-                    ["parent", "Parent Task"],
-                    ["none", "None"],
-                  ] as const)
-                    .filter(([value]) => SHOW_TASK_PRIORITY_UI || value !== "priority")
-                    .map(([value, label]) => (
-                    <button
-                      key={value}
-                      className={`flex items-center justify-between w-full px-2 py-1.5 text-sm rounded-sm ${
-                        viewState.groupBy === value ? "bg-accent/50 text-foreground" : "hover:bg-accent/50 text-muted-foreground"
-                      }`}
-                      onClick={() => updateView({ groupBy: value })}
-                    >
-                      <span>{label}</span>
-                      {viewState.groupBy === value && <Check className="h-3.5 w-3.5" />}
-                    </button>
-                  ))}
-                </div>
-              </PopoverContent>
-            </Popover>
-          )}
           </>
         )}
       />
@@ -1987,517 +1249,19 @@ function StreamlinedIssuesList({
           Some board columns are showing up to {ISSUE_BOARD_COLUMN_RESULT_LIMIT} tasks. Refine filters or search to reveal the rest.
         </p>
       )}
-      {!isLoading && !externalObjectFilterLoading && filtered.length === 0 && viewState.viewMode === "list" && (
-        <EmptyState
-          icon={CircleDot}
-          message="No tasks match the current filters or search."
-          action={createActionLabel}
-          onAction={() => openCreateIssueDialog()}
-        />
-      )}
-
-      {isBoardView ? (
-        <KanbanBoard
-          layout={viewState.viewMode === "grid" ? "grid" : "board"}
-          issues={filtered}
-          agents={agents}
-          liveIssueIds={liveIssueIds}
-          compactCards={boardCompactCards}
-          collapsedStatuses={boardCollapsedStatuses}
-          initialVisibleCount={viewState.boardColumnPageSize}
-          revealIncrement={viewState.boardColumnPageSize}
-          onUpdateIssue={onUpdateIssue}
-        />
-      ) : (
-        <div className="-mx-2 sm:mx-0">
-          {groupedContent.map((group) => {
-          if (remainingRowsToRender <= 0) return null;
-          return (
-          <Collapsible
-            key={group.key}
-            open={!viewState.collapsedGroups.includes(group.key)}
-            onOpenChange={(open) => {
-              updateView({
-                collapsedGroups: open
-                  ? viewState.collapsedGroups.filter((k) => k !== group.key)
-                  : [...viewState.collapsedGroups, group.key],
-              });
-            }}
-          >
-            {group.label && (
-              // Left inset aligns the header chevron with the nested task
-              // chevrons: tasks-list rows sit at pl-1 before their chevron
-              // (no unread column), so the band adds no extra left inset.
-              <div
-                data-issues-group-key={group.key}
-                className={cn("rounded-lg px-3 sm:pl-0 sm:pr-4", selectedNavKey === `group:${group.key}` ? "bg-accent/50" : "hover:bg-accent/50")}
-                onClick={() => setSelectedNavKey(`group:${group.key}`)}
-                onMouseEnter={() => setNavSelectionFromPointer(`group:${group.key}`)}
-              >
-              <IssueGroupHeader
-                label={group.label}
-                collapsible
-                collapsed={viewState.collapsedGroups.includes(group.key)}
-                onToggle={() => {
-                  updateView({
-                    collapsedGroups: viewState.collapsedGroups.includes(group.key)
-                      ? viewState.collapsedGroups.filter((k) => k !== group.key)
-                      : [...viewState.collapsedGroups, group.key],
-                  });
-                }}
-                trailing={(
-                  <Button
-                    variant="ghost"
-                    size="icon-xs"
-                    className="-mr-2 text-muted-foreground"
-                    title={`New task in ${group.label}`}
-                    aria-label={`New task in ${group.label}`}
-                    onClick={() => openCreateIssueDialog(group)}
-                  >
-                    <Plus className="h-3 w-3" />
-                  </Button>
-                )}
-              />
-              </div>
-            )}
-            <CollapsibleContent>
-              {(() => {
-                const { roots, childMap } = viewState.nestingEnabled
-                  ? buildIssueTree(group.items)
-                  : { roots: group.items, childMap: new Map<string, Issue[]>() };
-
-                const renderIssueRow = (issue: Issue, depth: number) => {
-                  if (remainingRowsToRender <= 0) return null;
-                  remainingRowsToRender -= 1;
-
-                  const children = childMap.get(issue.id) ?? [];
-                  const hasChildren = children.length > 0;
-                  const totalDescendants = hasChildren ? countDescendants(issue.id, childMap) : 0;
-                  const isExpanded = !viewState.collapsedParents.includes(issue.id);
-                  const useDeferredRowRendering = !(hasChildren && isExpanded);
-                  const issueProject = issue.projectId ? projectById.get(issue.projectId) ?? null : null;
-                  const parentIssue = issue.parentId ? issueById.get(issue.parentId) ?? null : null;
-                  const issueBadge = issueBadgeById?.get(issue.id);
-                  const isMutedIssue = mutedIssueIds?.has(issue.id) === true;
-                  const assigneeUserProfile = issue.assigneeUserId
-                    ? companyUserProfileMap.get(issue.assigneeUserId) ?? null
-                    : null;
-                  const assigneeUserLabel = formatAssigneeUserLabel(
-                    issue.assigneeUserId,
-                    currentUserId,
-                    companyUserLabelMap,
-                  ) ?? assigneeUserProfile?.label ?? null;
-                  const originatingActor = deriveOriginatingActor(issue);
-                  const originatingUserId = originatingActor?.kind === "user" ? originatingActor.id : null;
-                  const originatingViaAgentId =
-                    originatingActor?.kind === "user" ? originatingActor.viaAgentId ?? null : null;
-                  const toggleCollapse = (e: { preventDefault: () => void; stopPropagation: () => void }) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    updateView({
-                      collapsedParents: isExpanded
-                        ? [...viewState.collapsedParents, issue.id]
-                        : viewState.collapsedParents.filter((id) => id !== issue.id),
-                    });
-                  };
-                  const checklistMeta = workflowChecklistMeta;
-                  const checklistStepNumber = checklistMeta?.stepNumberByIssueId.get(issue.id) ?? null;
-                  const unresolvedVisibleBlockers = checklistMeta?.unresolvedVisibleBlockersByIssueId.get(issue.id) ?? [];
-                  const checklistRowId = checklistMeta ? `issue-workflow-row-${issue.id}` : undefined;
-                  const doneRowTitleClass = checklistMeta && issue.status === "done"
-                    ? "text-muted-foreground"
-                    : undefined;
-                  const visibleBlockerChips = unresolvedVisibleBlockers
-                    .map((blockerId) => {
-                      const blockerIssue = issueById.get(blockerId);
-                      if (!blockerIssue) return null;
-                      const label = blockerIssue.identifier ?? blockerIssue.id.slice(0, 8);
-                      const blockerStep = checklistMeta?.stepNumberByIssueId.get(blockerId);
-                      const blockerStepSuffix = blockerStep ? ` \u00b7 step ${blockerStep}` : "";
-                      return { blockerId, chipLabel: `blocked by ${label}${blockerStepSuffix}` };
-                    })
-                    .filter((chip): chip is { blockerId: string; chipLabel: string } => chip !== null);
-                  const firstVisibleBlockerChip = visibleBlockerChips[0] ?? null;
-                  const additionalVisibleBlockerCount = Math.max(visibleBlockerChips.length - 1, 0);
-                  const additionalVisibleBlockerLabel = additionalVisibleBlockerCount > 0
-                    ? ` ... and ${additionalVisibleBlockerCount} more`
-                    : "";
-                  const firstVisibleBlockerDisplayLabel = firstVisibleBlockerChip
-                    ? `${firstVisibleBlockerChip.chipLabel}${additionalVisibleBlockerLabel}`
-                    : "";
-                  const hiddenVisibleBlockerLabels = visibleBlockerChips
-                    .slice(1)
-                    .map((chip) => chip.chipLabel)
-                    .join(", ");
-                  const firstVisibleBlockerTitle = additionalVisibleBlockerCount > 0
-                    ? `${firstVisibleBlockerDisplayLabel}: ${hiddenVisibleBlockerLabels}`
-                    : firstVisibleBlockerDisplayLabel;
-                  const checklistDependencyChips = checklistMeta && firstVisibleBlockerChip ? (
-                    <button
-                      key={firstVisibleBlockerChip.blockerId}
-                      type="button"
-                      data-slot="icon-button"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        const target = document.getElementById(`issue-workflow-row-${firstVisibleBlockerChip.blockerId}`);
-                        if (!target) return;
-                        target.scrollIntoView({ behavior: "smooth", block: "nearest" });
-                        target.focus?.();
-                      }}
-                      className="inline-flex items-center rounded-full border border-amber-400/45 bg-amber-50/60 px-1.5 py-0.5 text-(length:--text-nano) font-medium text-amber-700 hover:bg-amber-100/80 dark:border-amber-300/35 dark:bg-amber-400/10 dark:text-amber-300"
-                      title={firstVisibleBlockerTitle}
-                      aria-label={firstVisibleBlockerTitle}
-                    >
-                      {firstVisibleBlockerDisplayLabel}
-                    </button>
-                  ) : null;
-
-                  return (
-                    <div
-                      key={issue.id}
-                      data-issue-row-id={issue.id}
-                      // Canonical rows use the same tree-guide slots at every width.
-                      className={rowPresentation === "legacy" && depth > 0 ? MOBILE_TREE_INDENT[Math.min(depth, MOBILE_TREE_INDENT.length - 1)] : undefined}
-                      style={useDeferredRowRendering
-                        ? {
-                          contentVisibility: "auto",
-                          containIntrinsicSize: "44px",
-                        }
-                        : undefined}
-                    >
-                      <IssueRow
-                        issue={issue}
-                        presentation={rowPresentation}
-                        issueLinkState={issueLinkState}
-                        selected={selectedNavKey === `issue:${issue.id}`}
-                        onMouseEnter={() => setNavSelectionFromPointer(`issue:${issue.id}`)}
-                        treeGuides={depth}
-                        chevronInGuide={depth > 0 && hasChildren}
-                        checklistStepNumber={checklistStepNumber}
-                        checklistCurrentStep={checklistMeta?.currentStepIssueId === issue.id}
-                        checklistDependencyChips={checklistDependencyChips}
-                        checklistRowId={checklistRowId}
-                        titleClassName={doneRowTitleClass}
-                        externalObjectSummary={externalObjectSummaryByIssueId.get(issue.id) ?? null}
-                        titleSuffix={(
-                          <>
-                            {hasChildren && !isExpanded ? (
-                              <span className="ml-1.5 text-xs text-muted-foreground">
-                                ({totalDescendants} sub-task{totalDescendants !== 1 ? "s" : ""})
-                              </span>
-                            ) : null}
-                            {issueBadge ? (
-                              issueBadge === "Paused" ? (
-                                <Badge variant="ghost"
-                                  className={cn("ml-1.5 px-1.5 text-(length:--text-nano)", statusBadge.paused)}
-                                  aria-label="Paused"
-                                  title="Paused"
-                                >
-                                  <CircleSlash2 className="h-3 w-3" />
-                                  Paused
-                                </Badge>
-                              ) : (
-                                <Badge variant="outline" className="ml-1.5 border-amber-500/40 bg-amber-500/10 px-1.5 text-(length:--text-nano) text-amber-700 dark:text-amber-300">
-                                  {issueBadge}
-                                </Badge>
-                              )
-                            ) : null}
-                            {isSuccessfulRunHandoffRequired(issue) ? (
-                              <Badge variant="outline"
-                                className="ml-1.5 border-amber-400/45 bg-amber-50/60 px-1.5 text-(length:--text-nano) text-amber-700 dark:border-amber-300/35 dark:bg-amber-400/10 dark:text-amber-300"
-                                aria-label="Needs next step"
-                                title="This task needs a next step"
-                              >
-                                <CircleDot className="h-3 w-3" />
-                                Needs next step
-                              </Badge>
-                            ) : null}
-                          </>
-                        )}
-                        className={cn(isMutedIssue && "opacity-70", selectedNavKey === `issue:${issue.id}` && "bg-accent/50 hover:bg-accent/50")}
-                        leadingControl={rowPresentation === "task" ? (
-                          hasChildren ? (
-                            <button
-                              type="button"
-                              data-slot="icon-button"
-                              className="inline-flex h-4 w-4 shrink-0 items-center justify-center"
-                              aria-label={isExpanded ? "Collapse sub-tasks" : "Expand sub-tasks"}
-                              onClick={toggleCollapse}
-                            >
-                              <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-90")} />
-                            </button>
-                          ) : (
-                            <span data-slot="task-row-disclosure-spacer" className="h-4 w-4 shrink-0" aria-hidden="true" />
-                          )
-                        ) : undefined}
-                        statusSlot={rowPresentation === "task" ? (
-                          <span className="relative inline-flex items-start self-stretch sm:items-center" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
-                            <StatusIcon status={issue.status} externalConversationState={issue.externalConversationState} size="md" blockerAttention={issue.blockerAttention} onChange={(s) => onUpdateIssue(issue.id, { status: s })} />
-                            {hasChildren && isExpanded ? (
-                              <span aria-hidden="true" className="pointer-events-none absolute top-5 -bottom-2.5 left-1/2 w-px bg-border sm:hidden" />
-                            ) : null}
-                          </span>
-                        ) : undefined}
-                        metadata={rowPresentation === "task" ? (
-                          <InboxIssueMetaLeading
-                            issue={issue}
-                            isLive={liveIssueIds?.has(issue.id) === true}
-                            subtreeLiveCount={subtreeLiveCounts.get(issue.id) ?? 0}
-                            showStatus={false}
-                            showIdentifier={false}
-                            checklistStepNumber={checklistStepNumber}
-                          />
-                        ) : undefined}
-                        showIdentifier={visibleIssueColumnSet.has("id") && availableIssueColumnSet.has("id")}
-                        mobileLeading={
-                          hasChildren ? (
-                            <button type="button" data-slot="icon-button" onClick={toggleCollapse}>
-                              <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-90")} />
-                            </button>
-                          ) : (
-                            <span className="inline-flex items-center" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
-                              <StatusIcon status={issue.status} externalConversationState={issue.externalConversationState} size="md" blockerAttention={issue.blockerAttention} onChange={(s) => onUpdateIssue(issue.id, { status: s })} />
-                            </span>
-                          )
-                        }
-                        desktopMetaLeading={rowPresentation === "legacy" ? (
-                          <>
-                            {hasChildren ? (
-                              <button
-                                type="button"
-                                data-slot="icon-button"
-                                className="relative z-10 hidden w-4 shrink-0 items-center justify-center sm:inline-flex"
-                                onClick={toggleCollapse}
-                              >
-                                <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-90")} />
-                              </button>
-                            ) : (
-                              <span className="hidden w-4 shrink-0 sm:block" />
-                            )}
-                            <InboxIssueMetaLeading
-                              issue={issue}
-                              isLive={liveIssueIds?.has(issue.id) === true}
-                              subtreeLiveCount={subtreeLiveCounts.get(issue.id) ?? 0}
-                              showStatus={visibleIssueColumnSet.has("status") && availableIssueColumnSet.has("status")}
-                              showIdentifier={visibleIssueColumnSet.has("id") && availableIssueColumnSet.has("id")}
-                              checklistStepNumber={checklistStepNumber}
-                              statusSlot={(
-                                <span className="inline-flex items-center" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
-                                  <StatusIcon status={issue.status} externalConversationState={issue.externalConversationState} size="md" blockerAttention={issue.blockerAttention} onChange={(s) => onUpdateIssue(issue.id, { status: s })} />
-                                </span>
-                              )}
-                            />
-                          </>
-                        ) : undefined}
-                        mobileTitleMeta={rowPresentation === "task" ? issueActivityTimestamp(issue) : undefined}
-                        mobileMeta={rowPresentation === "legacy" ? issueActivityText(issue).toLowerCase() : undefined}
-                        trailingMeta={rowPresentation === "task"
-                          && visibleIssueColumnSet.has("updated")
-                          && availableIssueColumnSet.has("updated")
-                          ? issueActivityTimestamp(issue)
-                          : undefined}
-                        desktopTrailing={(
-                          visibleTrailingIssueColumns.length > 0 ? (
-                            <InboxIssueTrailingColumns
-                              issue={issue}
-                              columns={visibleTrailingIssueColumns}
-                              projectName={issueProject?.name ?? null}
-                              projectColor={issueProject?.color ?? null}
-                              workspaceId={resolveIssueFilterWorkspaceId(issue, issueFilterWorkspaceContext)}
-                              workspaceName={resolveIssueWorkspaceName(issue, {
-                                executionWorkspaceById,
-                                projectWorkspaceById,
-                                defaultProjectWorkspaceIdByProjectId,
-                              })}
-                              onFilterWorkspace={filterToWorkspace}
-                              assigneeName={agentName(issue.assigneeAgentId)}
-                            assigneeAgent={agents?.find((agent) => agent.id === issue.assigneeAgentId)}
-                            creatorAgent={agents?.find((agent) => agent.id === issue.createdByAgentId)}
-                              assigneeUserName={assigneeUserLabel}
-                              assigneeUserAvatarUrl={assigneeUserProfile?.image ?? null}
-                              creatorAgentName={agentName(issue.createdByAgentId)}
-                              creatorUserName={originatingUserId ? (companyUserProfileMap.get(originatingUserId)?.label ?? null) : null}
-                              creatorUserAvatarUrl={originatingUserId ? (companyUserProfileMap.get(originatingUserId)?.image ?? null) : null}
-                              viaAgentName={originatingViaAgentId ? agentName(originatingViaAgentId) : null}
-                              currentUserId={currentUserId}
-                              parentIdentifier={parentIssue?.identifier ?? null}
-                              parentTitle={parentIssue?.title ?? null}
-                              assigneeContent={(
-                                <Popover
-                                  open={assigneePickerIssueId === issue.id}
-                                  onOpenChange={(open) => {
-                                    setAssigneePickerIssueId(open ? issue.id : null);
-                                    if (!open) setAssigneeSearch("");
-                                  }}
-                                >
-                                  <PopoverTrigger asChild>
-                                    <button
-                                      className="flex w-full shrink-0 items-center overflow-hidden rounded-md px-2 py-1 transition-colors hover:bg-accent/50"
-                                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                                    >
-                                      {issue.assigneeAgentId && agentName(issue.assigneeAgentId) ? (
-                                        <AgentIdentity agent={agents!.find((agent) => agent.id === issue.assigneeAgentId)!} size="sm" className="min-w-0" />
-                                      ) : issue.assigneeUserId ? (
-                                        <Identity
-                                          name={assigneeUserLabel ?? "User"}
-                                          avatarUrl={assigneeUserProfile?.image ?? null}
-                                          size="sm"
-                                          className="min-w-0"
-                                        />
-                                      ) : (
-                                        <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                                          <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-dashed border-muted-foreground/35 bg-muted/30">
-                                            <User className="h-3.5 w-3.5" />
-                                          </span>
-                                          Assignee
-                                        </span>
-                                      )}
-                                    </button>
-                                  </PopoverTrigger>
-                                  <PopoverContent
-                                    className="w-56 p-1"
-                                    align="end"
-                                    onClick={(e) => e.stopPropagation()}
-                                    onPointerDownOutside={() => setAssigneeSearch("")}
-                                  >
-                                    <input
-                                      className="mb-1 w-full border-b border-border bg-transparent px-2 py-1.5 text-xs outline-none placeholder:text-muted-foreground/50"
-                                      placeholder="Search responsible..."
-                                      value={assigneeSearch}
-                                      onChange={(e) => setAssigneeSearch(e.target.value)}
-                                      autoFocus
-                                    />
-                                    <div className="max-h-48 overflow-y-auto overscroll-contain">
-                                      <button
-                                        className={cn(
-                                          "flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-accent/50",
-                                          !issue.assigneeAgentId && !issue.assigneeUserId && "bg-accent",
-                                        )}
-                                        onClick={(e) => {
-                                          e.preventDefault();
-                                          e.stopPropagation();
-                                          assignIssue(issue.id, null, null);
-                                        }}
-                                      >
-                                        No responsible
-                                      </button>
-                                      {currentUserId && (
-                                        <button
-                                          className={cn(
-                                            "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent/50",
-                                            issue.assigneeUserId === currentUserId && "bg-accent",
-                                          )}
-                                          onClick={(e) => {
-                                            e.preventDefault();
-                                            e.stopPropagation();
-                                            assignIssue(issue.id, null, currentUserId);
-                                          }}
-                                        >
-                                          <User className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                                          <span>Me</span>
-                                        </button>
-                                      )}
-                                      {(agents ?? [])
-                                        .filter((agent) => {
-                                          if (!assigneeSearch.trim()) return true;
-                                          return agent.name.toLowerCase().includes(assigneeSearch.toLowerCase());
-                                        })
-                                        .map((agent) => (
-                                          <button
-                                            key={agent.id}
-                                            className={cn(
-                                              "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent/50",
-                                              issue.assigneeAgentId === agent.id && "bg-accent",
-                                            )}
-                                            onClick={(e) => {
-                                              e.preventDefault();
-                                              e.stopPropagation();
-                                              assignIssue(issue.id, agent.id, null);
-                                            }}
-                                          >
-                                            <AgentIdentity agent={agent} size="sm" className="min-w-0" />
-                                          </button>
-                                        ))}
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
-                              )}
-                            />
-                          ) : undefined
-                        )}
-                      />
-                    </div>
-                  );
-                };
-
-                const separatorField = viewState.showDateGroupSeparators
-                  ? issueDateSeparatorField(viewState)
-                  : null;
-                const separatorNow = new Date();
-                const nodes: ReactNode[] = [];
-                let previousDateGroup: TaskDateGroup | null = null;
-                let previousAgeBucket: 0 | 1 | 2 | null = null;
-                const appendIssueRow = (issue: Issue, depth: number) => {
-                  const node = renderIssueRow(issue, depth);
-                  // Skip rows the render budget dropped so separators never
-                  // dangle above an unrendered (or absent) row.
-                  if (node === null) return;
-                  if (separatorField && rowPresentation === "task") {
-                    const currentDateGroup = taskDateGroup(issue[separatorField], separatorNow);
-                    const separatorLabel = taskDateGroupSeparator(previousDateGroup, currentDateGroup);
-                    if (separatorLabel) {
-                      nodes.push(
-                        <IssueDateSeparator
-                          key={`date-sep-${issue.id}-${currentDateGroup}`}
-                          label={separatorLabel}
-                        />,
-                      );
-                    }
-                    previousDateGroup = currentDateGroup;
-                  } else if (separatorField) {
-                    const currentAgeBucket = issueAgeBucket(issue[separatorField], separatorNow.getTime());
-                    for (const crossedBucket of previousAgeBucket === null
-                      ? []
-                      : issueAgeBucketsCrossed(previousAgeBucket, currentAgeBucket)) {
-                      nodes.push(
-                        <IssueDateSeparator
-                          key={`date-sep-${issue.id}-${crossedBucket}`}
-                          label={issueAgeSeparatorLabel(crossedBucket)}
-                        />,
-                      );
-                    }
-                    previousAgeBucket = currentAgeBucket;
-                  }
-                  nodes.push(node);
-                  if (!viewState.collapsedParents.includes(issue.id)) {
-                    for (const child of childMap.get(issue.id) ?? []) {
-                      appendIssueRow(child, depth + 1);
-                    }
-                  }
-                };
-                for (const issue of roots) {
-                  appendIssueRow(issue, 0);
-                }
-                return nodes;
-              })()}
-            </CollapsibleContent>
-          </Collapsible>
-          );
-          })}
-          {(remainingIssueRowCount > 0 || hasMoreIssues || isLoadingMoreIssues) && (
-            <div className="py-2" data-testid="issues-load-more-sentinel">
-              <p className="text-xs text-muted-foreground">
-                {isLoadingMoreIssues
-                  ? "Loading more tasks..."
-                  : remainingIssueRowCount > 0
-                    ? `Rendering ${Math.min(renderedIssueRowLimit, filtered.length)} of ${filtered.length} tasks`
-                    : "Scroll to load more tasks"}
-              </p>
-            </div>
-          )}
-        </div>
-      )}
+      <KanbanBoard
+        layout={boardLayout}
+        issues={filtered}
+        agents={agents}
+        liveIssueIds={liveIssueIds}
+        compactCards={boardCompactCards}
+        collapsedStatuses={boardCollapsedStatuses}
+        initialVisibleCount={viewState.boardColumnPageSize}
+        revealIncrement={viewState.boardColumnPageSize}
+        laneFold={laneFold}
+        onLaneFoldChange={setLaneFold}
+        onUpdateIssue={onUpdateIssue}
+      />
     </div>
   );
 }

@@ -134,15 +134,9 @@ function statusLabel(status: string): string {
   return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-// The columns the board and grid show. Backlog and cancelled tasks stay in the List view.
-export const kanbanLaneStatuses = [
-  "todo",
-  "in_progress",
-  "in_review",
-  "blocked",
-  "done",
-] as const satisfies readonly IssueStatus[];
-const gridOpenStatuses = kanbanLaneStatuses.filter((status) => status !== "done");
+// The Grid's columns: open statuses, then Done as a short list. Board shows every status (`boardStatuses`).
+const gridOpenStatuses = ["todo", "in_progress", "in_review", "blocked"] as const satisfies readonly IssueStatus[];
+const gridStatuses: readonly IssueStatus[] = [...gridOpenStatuses, "done"];
 const GRID_DONE_PREVIEW = 3;
 
 // A drop target is a lane cell (`<laneKey>:<status>`), a bare status, or a card id.
@@ -167,17 +161,38 @@ export interface KanbanLane {
 export const KANBAN_NO_PARENT_LANE = "no-parent";
 
 function laneIsOpen(lane: KanbanLane) {
-  return lane.issues.some((issue) => issue.status !== "done");
+  return lane.issues.some((issue) => issue.status !== "done" && issue.status !== "cancelled");
+}
+
+/**
+ * Which lanes are open. A lane's own toggle sets `lanes[key]`; the Collapse
+ * all / Expand all toggle sets `all` and clears `lanes`. With neither set,
+ * Board folds lanes with no open work and Grid shows every lane open.
+ */
+export interface KanbanLaneFold {
+  all: boolean | null;
+  lanes: Record<string, boolean>;
+}
+
+function isKanbanLaneOpen(lane: KanbanLane, fold: KanbanLaneFold, layout: "board" | "grid") {
+  return fold.lanes[lane.key] ?? fold.all ?? (layout === "grid" || laneIsOpen(lane));
+}
+
+// Whether any lane shows open; IssuesList uses it to label its Collapse all / Expand all toggle.
+export function anyKanbanLaneOpen(issues: Issue[], fold: KanbanLaneFold, layout: "board" | "grid") {
+  const lanes = groupKanbanLanes(issues, layout === "grid" ? gridStatuses : boardStatuses);
+  return lanes.some((lane) => isKanbanLaneOpen(lane, fold, layout));
 }
 
 /**
  * Groups issues into one lane per parent task, for the Board and Grid views.
- * A parent heads its lane and is not a card in it; tasks with no parent (that
- * are not a parent here) go to the "No Parent" lane, last. Lanes with open
- * work come before lanes where every task is done. Keeps the given order.
+ * Only tasks in `statuses` are shown. A parent heads its lane and is not a
+ * card in it; tasks with no parent (that are not a parent here) go to the
+ * "No Parent" lane, last. Lanes with open work come before lanes where every
+ * task is done or cancelled. Keeps the given order.
  */
-export function groupKanbanLanes(issues: Issue[]): KanbanLane[] {
-  const shown = issues.filter((issue) => (kanbanLaneStatuses as readonly string[]).includes(issue.status));
+export function groupKanbanLanes(issues: Issue[], statuses: readonly IssueStatus[] = boardStatuses): KanbanLane[] {
+  const shown = issues.filter((issue) => statuses.includes(issue.status));
   const byId = new Map(issues.map((issue) => [issue.id, issue]));
   const parentIds = new Set(shown.map((issue) => issue.parentId).filter((id): id is string => !!id));
   const lanes = new Map<string, KanbanLane>();
@@ -220,6 +235,8 @@ interface KanbanBoardProps {
   revealIncrement?: number;
   // "board": status columns, lanes fold when all done. "grid": parent card on the left, Done as a short list.
   layout?: "board" | "grid";
+  laneFold?: KanbanLaneFold;
+  onLaneFoldChange?: (fold: KanbanLaneFold) => void;
   onUpdateIssue: (id: string, data: Record<string, unknown>) => void;
 }
 
@@ -236,6 +253,7 @@ function LaneCell({
   collapsed = false,
   visibleCount,
   revealIncrement,
+  laneTotal,
   onShowMore,
 }: {
   laneKey: string;
@@ -248,6 +266,8 @@ function LaneCell({
   collapsed?: boolean;
   visibleCount: number;
   revealIncrement: number;
+  // Board only: tasks in the whole lane, for the cell's own `DONE 6/6` header.
+  laneTotal?: number;
   onShowMore: () => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `${laneKey}:${status}` });
@@ -260,9 +280,16 @@ function LaneCell({
       ref={setNodeRef}
       className={cn(
         "min-h-16 min-w-0 space-y-1.5 rounded-md p-1.5 transition-colors",
-        isOver ? tone.bodyOver : "bg-muted/20",
+        isOver ? tone.bodyOver : laneTotal === undefined ? "bg-muted/20" : "bg-muted/50",
       )}
     >
+      {laneTotal !== undefined ? (
+        <p className={cn("flex items-center gap-1.5 px-1 pt-0.5 text-xs font-semibold uppercase tracking-wide", tone.header)}>
+          <StatusIcon status={status} />
+          <span className="truncate">{statusLabel(status)}</span>
+          <span className="font-normal tabular-nums text-muted-foreground">{issues.length}/{laneTotal}</span>
+        </p>
+      ) : null}
       {collapsed ? (
         <p className={cn("px-1 py-1 text-xs tabular-nums", tone.count)} title={`${statusLabel(status)}: ${issues.length}`}>
           {issues.length > 0 ? `${issues.length} hidden` : null}
@@ -368,6 +395,21 @@ function LaneTitle({ lane, wrap = false }: { lane: KanbanLane; wrap?: boolean })
   );
 }
 
+function LaneToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  const Chevron = open ? ChevronDown : ChevronRight;
+  return (
+    <button
+      type="button"
+      className="shrink-0 text-muted-foreground hover:text-foreground"
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-label={open ? "Fold lane" : "Open lane"}
+    >
+      <Chevron className="h-4 w-4" />
+    </button>
+  );
+}
+
 // Board lane header: chevron, parent, sub-task count, owner, and progress.
 function LaneHeader({
   lane,
@@ -380,18 +422,9 @@ function LaneHeader({
   agents?: Agent[];
   onToggle: () => void;
 }) {
-  const Chevron = open ? ChevronDown : ChevronRight;
   return (
     <div className="flex items-center gap-2 py-2 text-sm">
-      <button
-        type="button"
-        className="text-muted-foreground hover:text-foreground"
-        onClick={onToggle}
-        aria-expanded={open}
-        aria-label={open ? "Fold lane" : "Open lane"}
-      >
-        <Chevron className="h-4 w-4" />
-      </button>
+      <LaneToggle open={open} onToggle={onToggle} />
       <LaneTitle lane={lane} />
       <span className="shrink-0 text-xs text-muted-foreground">
         ({lane.issues.length} {lane.parentId ? "sub-task" : "task"}{lane.issues.length === 1 ? "" : "s"})
@@ -404,11 +437,24 @@ function LaneHeader({
   );
 }
 
-// Grid parent card: the parent task and its progress, left of its row.
-function ParentCard({ lane, agents }: { lane: KanbanLane; agents?: Agent[] }) {
+// Grid parent card: fold toggle, the parent task and its progress, left of its row.
+function ParentCard({
+  lane,
+  open,
+  agents,
+  onToggle,
+}: {
+  lane: KanbanLane;
+  open: boolean;
+  agents?: Agent[];
+  onToggle: () => void;
+}) {
   return (
     <div className="min-w-0 space-y-1.5 rounded-md border border-border bg-card p-2.5 text-sm">
-      <LaneTitle lane={lane} wrap />
+      <div className="flex items-start gap-1.5">
+        <LaneToggle open={open} onToggle={onToggle} />
+        <LaneTitle lane={lane} wrap />
+      </div>
       <div className="flex items-center gap-2">
         <LaneAssignee agentId={lane.parent?.assigneeAgentId ?? null} agents={agents} />
       </div>
@@ -535,8 +581,12 @@ function KanbanCard({
 
 /**
  * Task board: one lane per parent task, one column per status, drag a card to
- * change its status. `layout="board"` folds lanes where all tasks are done;
- * `layout="grid"` puts the parent card on the left and Done as a short list.
+ * change its status. `layout="board"` shows every status and folds lanes with
+ * no open work; `layout="grid"` shows open statuses, the parent card on the
+ * left, and Done as a short list. Each open Board lane shows its own status
+ * headers with lane counts (`DONE 6/6`); Grid has one header row at the top.
+ * Fold state is `laneFold` when the caller owns it (IssuesList, for its
+ * Collapse all / Expand all toggle), else local.
  * Used by the Board and Grid views in IssuesList.
  */
 export function KanbanBoard({
@@ -548,10 +598,14 @@ export function KanbanBoard({
   initialVisibleCount = KANBAN_COLUMN_INITIAL_VISIBLE_LIMIT,
   revealIncrement = KANBAN_COLUMN_REVEAL_INCREMENT,
   layout = "board",
+  laneFold: controlledLaneFold,
+  onLaneFoldChange,
   onUpdateIssue,
 }: KanbanBoardProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [laneOpen, setLaneOpen] = useState<Record<string, boolean>>({});
+  const [localLaneFold, setLocalLaneFold] = useState<KanbanLaneFold>({ all: null, lanes: {} });
+  const laneFold = controlledLaneFold ?? localLaneFold;
+  const setLaneFold = onLaneFoldChange ?? setLocalLaneFold;
   const paginationKey = `${initialVisibleCount}:${revealIncrement}`;
   const [visibleState, setVisibleState] = useState<{
     paginationKey: string;
@@ -564,7 +618,9 @@ export function KanbanBoard({
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
-  const lanes = useMemo(() => groupKanbanLanes(issues), [issues]);
+  const isGrid = layout === "grid";
+  const columnStatuses = isGrid ? gridStatuses : boardStatuses;
+  const lanes = useMemo(() => groupKanbanLanes(issues, columnStatuses), [issues, columnStatuses]);
   const statusTotals = useMemo(() => {
     const totals: Record<string, number> = {};
     for (const issue of issues) totals[issue.status] = (totals[issue.status] ?? 0) + 1;
@@ -617,6 +673,7 @@ export function KanbanBoard({
         collapsed={collapsedStatusSet.has(status)}
         visibleCount={visibleCountByCell[cellKey] ?? initialVisibleCount}
         revealIncrement={revealIncrement}
+        laneTotal={isGrid ? undefined : lane.issues.length}
         onShowMore={() => {
           setVisibleState((current) => {
             const counts = current.paginationKey === paginationKey ? current.counts : {};
@@ -630,50 +687,49 @@ export function KanbanBoard({
     );
   }
 
-  const isGrid = layout === "grid";
   const columns = isGrid ? "grid-cols-(--gtc-kanban-grid)" : "grid-cols-(--gtc-kanban-board)";
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="pb-4">
-        {/* Negative top matches the page's padding, so the header pins at the scroll edge. */}
-        <div className={cn("sticky -top-4 z-10 grid gap-2 border-b border-border bg-background py-2 md:-top-6", columns)}>
-          {isGrid ? (
+        {/* Grid only; each Board lane carries its own headers. Negative top matches the page's padding, so the header pins at the scroll edge. */}
+        {isGrid ? (
+          <div className={cn("sticky -top-4 z-10 grid gap-2 border-b border-border bg-background py-2 md:-top-6", columns)}>
             <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Parent Task</span>
-          ) : null}
-          {kanbanLaneStatuses.map((status) => (
-            <span
-              key={status}
-              className={cn("flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide", getKanbanColumnTone(status).header)}
-            >
-              <StatusIcon status={status} />
-              {statusLabel(status)}
-              <span className="font-normal tabular-nums text-muted-foreground">{statusTotals[status] ?? 0}</span>
-            </span>
-          ))}
-        </div>
+            {columnStatuses.map((status) => (
+              <span
+                key={status}
+                className={cn("flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide", getKanbanColumnTone(status).header)}
+              >
+                <StatusIcon status={status} />
+                {statusLabel(status)}
+                <span className="font-normal tabular-nums text-muted-foreground">{statusTotals[status] ?? 0}</span>
+              </span>
+            ))}
+          </div>
+        ) : null}
         {lanes.map((lane) => {
+          const open = isKanbanLaneOpen(lane, laneFold, layout);
+          const onToggle = () => setLaneFold({ ...laneFold, lanes: { ...laneFold.lanes, [lane.key]: !open } });
           if (isGrid) {
             return (
               <div key={lane.key} className={cn("grid gap-2 border-b border-border/60 py-2.5", columns)}>
-                <ParentCard lane={lane} agents={agents} />
-                {gridOpenStatuses.map((status) => renderCell(lane, status))}
-                <DoneList laneKey={lane.key} issues={lane.issues.filter((issue) => issue.status === "done")} />
+                <ParentCard lane={lane} open={open} agents={agents} onToggle={onToggle} />
+                {open ? (
+                  <>
+                    {gridOpenStatuses.map((status) => renderCell(lane, status))}
+                    <DoneList laneKey={lane.key} issues={lane.issues.filter((issue) => issue.status === "done")} />
+                  </>
+                ) : null}
               </div>
             );
           }
-          const open = laneOpen[lane.key] ?? laneIsOpen(lane);
           return (
             <section key={lane.key} className="border-b border-border/60">
-              <LaneHeader
-                lane={lane}
-                open={open}
-                agents={agents}
-                onToggle={() => setLaneOpen((current) => ({ ...current, [lane.key]: !open }))}
-              />
+              <LaneHeader lane={lane} open={open} agents={agents} onToggle={onToggle} />
               {open ? (
                 <div className={cn("grid gap-2 pb-3", columns)}>
-                  {kanbanLaneStatuses.map((status) => renderCell(lane, status))}
+                  {boardStatuses.map((status) => renderCell(lane, status))}
                 </div>
               ) : null}
             </section>
