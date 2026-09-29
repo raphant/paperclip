@@ -536,7 +536,12 @@ export function QuestionForm({
           </div>
         )
       ) : null}
-      <div>
+      {/* The card is pinned to the bottom of the screen, so a long question
+          scrolls here and the choices and buttons stay in view. */}
+      <div
+        className="max-h-[40dvh] overflow-y-auto overscroll-contain"
+        data-testid="question-form-prompt-scroll"
+      >
         {question.header ? (
           <p className="mb-1 text-xs font-medium text-muted-foreground">
             {question.header}
