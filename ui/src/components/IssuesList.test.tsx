@@ -1387,6 +1387,39 @@ describe("IssuesList", () => {
     });
   });
 
+  it("keeps the grid view mode and loads it like the board", async () => {
+    localStorage.setItem(
+      "paperclip:test-issues:company-1",
+      JSON.stringify({ viewMode: "grid" }),
+    );
+    mockIssuesApi.list.mockResolvedValue([]);
+
+    const { root } = renderWithQueryClient(
+      <IssuesList
+        issues={[createIssue({ id: "issue-grid", title: "Grid issue", status: "todo" })]}
+        agents={[]}
+        projects={[]}
+        viewStateKey="paperclip:test-issues"
+        onUpdateIssue={() => undefined}
+      />,
+      container,
+    );
+
+    await waitForAssertion(() => {
+      expect(mockIssuesApi.list).toHaveBeenCalledWith("company-1", expect.objectContaining({
+        status: "done",
+        limit: 200,
+      }), { signal: expect.any(AbortSignal) });
+      expect(mockKanbanBoard).toHaveBeenLastCalledWith(expect.objectContaining({ layout: "grid" }));
+      const pressed = container.querySelector('[aria-label="View mode"] [aria-pressed="true"]');
+      expect(pressed?.textContent).toBe("Grid");
+    });
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
   it("uses compact cards and collapsed cold lanes for high-volume boards", async () => {
     localStorage.setItem(
       "paperclip:test-issues:company-1",

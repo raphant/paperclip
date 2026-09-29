@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import type { Issue, IssueStatus } from "@paperclipai/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getKanbanColumnTone, KanbanBoard, resolveKanbanTargetStatus } from "./KanbanBoard";
+import { getKanbanColumnTone, groupKanbanLanes, KanbanBoard, resolveKanbanTargetStatus } from "./KanbanBoard";
 
 vi.mock("@/lib/router", () => ({
   Link: ({
@@ -199,17 +199,6 @@ describe("KanbanBoard", () => {
     expect(getKanbanColumnTone("cancelled").card).toContain("opacity-80");
   });
 
-  it("ghosts cancelled lane cards", () => {
-    const { container } = renderBoard({
-      issues: createIssues(1, "cancelled"),
-    });
-
-    const card = container.querySelector('a[href="/issues/PAP-1"]')?.parentElement;
-
-    expect(card?.className).toContain("bg-muted/35");
-    expect(card?.className).toContain("opacity-80");
-  });
-
   it("keeps core issue signals in compact cards", () => {
     const { container } = renderBoard({
       issues: createIssues(1, "todo"),
@@ -231,5 +220,38 @@ describe("KanbanBoard", () => {
     expect(resolveKanbanTargetStatus("done", issues)).toBe("done");
     expect(resolveKanbanTargetStatus("issue-blocked-2", issues)).toBe("blocked");
     expect(resolveKanbanTargetStatus("missing", issues)).toBeNull();
+  });
+
+  it("groups tasks into one lane per parent, then No Parent, and drops by lane cell", () => {
+    const parent = { ...createIssue(1, "in_progress"), title: "Parent task" };
+    const child = (index: number, status: IssueStatus, parentId: string | null) =>
+      ({ ...createIssue(index, status), parentId });
+    const finished = { ...createIssue(9, "done"), title: "Finished parent" };
+    const issues = [
+      child(2, "todo", parent.id),
+      child(3, "done", parent.id),
+      child(4, "done", finished.id),
+      parent,
+      child(5, "blocked", null),
+      child(6, "backlog", null),
+      finished,
+    ];
+
+    const lanes = groupKanbanLanes(issues);
+    expect(lanes.map((lane) => [lane.parent?.title ?? "No Parent", lane.issues.map((i) => i.id)])).toEqual([
+      ["Parent task", ["issue-todo-2", "issue-done-3"]],
+      ["Finished parent", ["issue-done-4"]],
+      ["No Parent", ["issue-blocked-5"]],
+    ]);
+
+    const { container } = renderBoard({ issues });
+    expect(container.textContent).toContain("1/2 done");
+    expect(container.textContent).toContain("No Parent");
+    // The all-done lane folds to its header; its card is hidden.
+    expect(container.textContent).toContain("Finished parent");
+    expect(container.textContent).not.toContain("Issue 4");
+    // Dropping a card on another lane's cell changes only its status.
+    expect(resolveKanbanTargetStatus(`${parent.id}:in_review`, issues)).toBe("in_review");
+    expect(resolveKanbanTargetStatus("no-parent:done", issues)).toBe("done");
   });
 });

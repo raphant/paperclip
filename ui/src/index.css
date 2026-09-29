@@ -2727,6 +2727,8 @@ span.paperclip-mention-chip[data-mention-kind="external-object"] {
   --gtc-6: auto minmax(0,1fr) auto; /* Extracted from ui/src/components/FileViewerSheet.tsx (grid-cols-[auto_minmax(0,1fr)_auto]). */
   --gtc-7: 7.5rem minmax(0,1fr); /* Extracted from ui/src/components/IssueChatThread.tsx (grid-cols-[7.5rem_minmax(0,1fr)]). */
   --gtc-8: 7.5rem 1fr; /* Extracted from ui/src/components/IssueRecoveryActionCard.tsx (grid-cols-[7.5rem_1fr]). */
+  --gtc-kanban-board: repeat(4,minmax(0,1fr)) minmax(0,0.8fr); /* KanbanBoard.tsx board layout: four open statuses, a narrower Done. */
+  --gtc-kanban-grid: 16rem repeat(4,minmax(0,1fr)) 15rem; /* KanbanBoard.tsx grid layout: parent card, four open statuses, Done list. */
   --gtc-9: 300px minmax(0,1fr); /* Extracted from ui/src/components/RoutineHistoryTab.tsx (grid-cols-[300px_minmax(0,1fr)]). */
   --gtc-10: 10rem 1fr; /* Extracted from ui/src/components/SourceResolvedFoldCallout.tsx (grid-cols-[10rem_1fr]). */
   --gtc-11: 12rem 1fr; /* Extracted from ui/src/components/SourceResolvedFoldCallout.tsx (grid-cols-[12rem_1fr]). */

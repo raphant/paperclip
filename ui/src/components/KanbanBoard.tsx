@@ -9,7 +9,6 @@ import {
   useSensors,
   type DragStartEvent,
   type DragEndEvent,
-  type DragOverEvent,
 } from "@dnd-kit/core";
 import { useDroppable } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
@@ -23,7 +22,7 @@ import { PriorityIcon } from "./PriorityIcon";
 import { SHOW_TASK_PRIORITY_UI } from "../lib/ui-flags";
 import { Identity } from "./Identity";
 import type { Issue, IssueStatus } from "@paperclipai/shared";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
 import { isSuccessfulRunHandoffRequired } from "../lib/successful-run-handoff";
 import { collectSubtreeLiveCounts } from "../lib/liveIssueIds";
 import { cn } from "../lib/utils";
@@ -135,11 +134,75 @@ function statusLabel(status: string): string {
   return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// The columns the board and grid show. Backlog and cancelled tasks stay in the List view.
+export const kanbanLaneStatuses = [
+  "todo",
+  "in_progress",
+  "in_review",
+  "blocked",
+  "done",
+] as const satisfies readonly IssueStatus[];
+const gridOpenStatuses = kanbanLaneStatuses.filter((status) => status !== "done");
+const GRID_DONE_PREVIEW = 3;
+
+// A drop target is a lane cell (`<laneKey>:<status>`), a bare status, or a card id.
 export function resolveKanbanTargetStatus(overId: string, issues: Issue[]): IssueStatus | null {
-  if ((boardStatuses as readonly string[]).includes(overId)) {
-    return overId as IssueStatus;
+  const status = overId.slice(overId.lastIndexOf(":") + 1);
+  if ((boardStatuses as readonly string[]).includes(status)) {
+    return status as IssueStatus;
   }
   return issues.find((issue) => issue.id === overId)?.status ?? null;
+}
+
+type LaneParent = Pick<Issue, "id" | "identifier" | "title" | "assigneeAgentId"> & { status: string };
+
+export interface KanbanLane {
+  key: string;
+  parentId: string | null;
+  // Null for the "No Parent" lane, or when the parent is not loaded and no child carries it.
+  parent: LaneParent | null;
+  issues: Issue[];
+}
+
+export const KANBAN_NO_PARENT_LANE = "no-parent";
+
+function laneIsOpen(lane: KanbanLane) {
+  return lane.issues.some((issue) => issue.status !== "done");
+}
+
+/**
+ * Groups issues into one lane per parent task, for the Board and Grid views.
+ * A parent heads its lane and is not a card in it; tasks with no parent (that
+ * are not a parent here) go to the "No Parent" lane, last. Lanes with open
+ * work come before lanes where every task is done. Keeps the given order.
+ */
+export function groupKanbanLanes(issues: Issue[]): KanbanLane[] {
+  const shown = issues.filter((issue) => (kanbanLaneStatuses as readonly string[]).includes(issue.status));
+  const byId = new Map(issues.map((issue) => [issue.id, issue]));
+  const parentIds = new Set(shown.map((issue) => issue.parentId).filter((id): id is string => !!id));
+  const lanes = new Map<string, KanbanLane>();
+  const loose: Issue[] = [];
+  for (const issue of shown) {
+    if (!issue.parentId) {
+      if (!parentIds.has(issue.id)) loose.push(issue);
+      continue;
+    }
+    let lane = lanes.get(issue.parentId);
+    if (!lane) {
+      const parent = byId.get(issue.parentId)
+        ?? issue.ancestors?.find((ancestor) => ancestor.id === issue.parentId)
+        ?? null;
+      lane = { key: issue.parentId, parentId: issue.parentId, parent, issues: [] };
+      lanes.set(issue.parentId, lane);
+    }
+    lane.issues.push(issue);
+  }
+  const parentLanes = [...lanes.values()];
+  return [
+    ...parentLanes.filter(laneIsOpen),
+    ...parentLanes.filter((lane) => !laneIsOpen(lane)),
+    ...(loose.length > 0 ? [{ key: KANBAN_NO_PARENT_LANE, parentId: null, parent: null, issues: loose }] : []),
+  ];
 }
 
 interface Agent {
@@ -155,12 +218,15 @@ interface KanbanBoardProps {
   collapsedStatuses?: string[];
   initialVisibleCount?: number;
   revealIncrement?: number;
+  // "board": status columns, lanes fold when all done. "grid": parent card on the left, Done as a short list.
+  layout?: "board" | "grid";
   onUpdateIssue: (id: string, data: Record<string, unknown>) => void;
 }
 
-/* ── Droppable Column ── */
+/* ── Lane cell: one status inside one lane, a drop target ── */
 
-function KanbanColumn({
+function LaneCell({
+  laneKey,
   status,
   issues,
   agents,
@@ -172,6 +238,7 @@ function KanbanColumn({
   revealIncrement,
   onShowMore,
 }: {
+  laneKey: string;
   status: IssueStatus;
   issues: Issue[];
   agents?: Agent[];
@@ -183,86 +250,169 @@ function KanbanColumn({
   revealIncrement: number;
   onShowMore: () => void;
 }) {
-  const { setNodeRef, isOver } = useDroppable({ id: status });
-
-  const isEmpty = issues.length === 0;
+  const { setNodeRef, isOver } = useDroppable({ id: `${laneKey}:${status}` });
   const visibleIssues = collapsed ? [] : issues.slice(0, visibleCount);
-  const hiddenCount = Math.max(issues.length - visibleIssues.length, 0);
-  const nextRevealCount = Math.min(revealIncrement, hiddenCount);
+  const hiddenCount = collapsed ? 0 : Math.max(issues.length - visibleIssues.length, 0);
   const tone = getKanbanColumnTone(status);
 
-  if (collapsed) {
-    return (
-      <div
-        ref={setNodeRef}
-        className={cn(
-          "flex min-h-(--sz-220px) w-(--sz-52px) shrink-0 flex-col items-center rounded-md border px-1.5 py-2 transition-colors",
-          tone.rail,
-          isOver && tone.railOver,
-        )}
-        title={`${statusLabel(status)}: ${issues.length}`}
-      >
-        <StatusIcon status={status} />
-        <span className={cn("mt-2 [writing-mode:vertical-rl] rotate-180 text-(length:--text-nano) font-semibold uppercase tracking-wide", tone.header)}>
-          {statusLabel(status)}
-        </span>
-        <Badge variant="ghost" className={cn("mt-auto bg-background px-1.5 text-(length:--text-nano) tabular-nums", tone.header)}>
-          {issues.length}
-        </Badge>
-      </div>
-    );
-  }
-
   return (
-    <div className="flex flex-col shrink-0 min-w-(--sz-260px) w-(--sz-260px)">
-      <div className="flex items-center gap-2 px-3 py-2 mb-1">
-        <StatusIcon status={status} />
-        <span className={cn("text-xs font-semibold uppercase tracking-wide", tone.header)}>
-          {statusLabel(status)}
-        </span>
-        <span className={cn("ml-auto text-xs tabular-nums", tone.count)}>
-          {issues.length}
-        </span>
-      </div>
-      <div
-        ref={setNodeRef}
-        className={cn(
-          "flex-1 min-h-(--sz-120px) rounded-md p-2 space-y-1 transition-colors",
-          isOver ? tone.bodyOver : tone.body,
-        )}
-      >
-        {/* Hidden cards are intentionally excluded from sort targets until revealed. */}
-        <SortableContext
-          items={visibleIssues.map((i) => i.id)}
-          strategy={verticalListSortingStrategy}
+    <div
+      ref={setNodeRef}
+      className={cn(
+        "min-h-16 min-w-0 space-y-1.5 rounded-md p-1.5 transition-colors",
+        isOver ? tone.bodyOver : "bg-muted/20",
+      )}
+    >
+      {collapsed ? (
+        <p className={cn("px-1 py-1 text-xs tabular-nums", tone.count)} title={`${statusLabel(status)}: ${issues.length}`}>
+          {issues.length > 0 ? `${issues.length} hidden` : null}
+        </p>
+      ) : null}
+      {/* Hidden cards are intentionally excluded from sort targets until revealed. */}
+      <SortableContext items={visibleIssues.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+        {visibleIssues.map((issue) => (
+          <KanbanCard
+            key={issue.id}
+            issue={issue}
+            agents={agents}
+            isLive={liveIssueIds?.has(issue.id)}
+            subtreeLiveCount={subtreeLiveCounts?.get(issue.id) ?? 0}
+            compact={compactCards || status === "done"}
+            className={tone.card}
+          />
+        ))}
+      </SortableContext>
+      {hiddenCount > 0 ? (
+        <button
+          type="button"
+          className="flex w-full items-center justify-center rounded-md border border-dashed border-border bg-background/70 px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
+          onClick={onShowMore}
         >
-          {visibleIssues.map((issue) => (
-            <KanbanCard
-              key={issue.id}
-              issue={issue}
-              agents={agents}
-              isLive={liveIssueIds?.has(issue.id)}
-              subtreeLiveCount={subtreeLiveCounts?.get(issue.id) ?? 0}
-              compact={compactCards}
-              className={tone.card}
-            />
-          ))}
-        </SortableContext>
-        {hiddenCount > 0 ? (
-          <button
-            type="button"
-            className="mt-1 flex w-full items-center justify-center rounded-md border border-dashed border-border bg-background/70 px-2 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground"
-            onClick={onShowMore}
-          >
-            Show {nextRevealCount} more
-          </button>
-        ) : null}
-        {issues.length > 0 && (hiddenCount > 0 || issues.length >= visibleCount) ? (
-          <p className="px-1 pt-1 text-(length:--text-micro) text-muted-foreground">
-            Showing {visibleIssues.length} of {issues.length}
-          </p>
-        ) : null}
+          Show {Math.min(revealIncrement, hiddenCount)} more
+        </button>
+      ) : null}
+      {hiddenCount > 0 ? (
+        <p className="px-1 text-(length:--text-micro) text-muted-foreground">
+          Showing {visibleIssues.length} of {issues.length}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/* ── Grid Done list: the last few done tasks, then "+N more" ── */
+
+function DoneList({ laneKey, issues }: { laneKey: string; issues: Issue[] }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `${laneKey}:done` });
+  const recent = [...issues].sort((a, b) => timeOf(b) - timeOf(a));
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn("min-w-0 space-y-1 rounded-md p-1.5 text-xs transition-colors", isOver && getKanbanColumnTone("done").bodyOver)}
+    >
+      {recent.slice(0, GRID_DONE_PREVIEW).map((issue) => (
+        <Link
+          key={issue.id}
+          to={`/issues/${issue.identifier ?? issue.id}`}
+          disableIssueQuicklook
+          className="flex items-center gap-1.5 text-muted-foreground no-underline hover:text-foreground"
+        >
+          <StatusIcon status="done" />
+          <span className="truncate">{issue.title}</span>
+        </Link>
+      ))}
+      {recent.length > GRID_DONE_PREVIEW ? (
+        <p className="pl-5 text-(length:--text-micro) text-muted-foreground">+{recent.length - GRID_DONE_PREVIEW} more</p>
+      ) : null}
+    </div>
+  );
+}
+
+function timeOf(issue: Issue) {
+  return new Date(issue.completedAt ?? issue.updatedAt).getTime();
+}
+
+/* ── Lane parts ── */
+
+function LaneProgress({ issues }: { issues: Issue[] }) {
+  const done = issues.filter((issue) => issue.status === "done").length;
+  return (
+    <span className="flex shrink-0 items-center gap-2 text-(length:--text-micro) text-muted-foreground tabular-nums">
+      <span className="flex h-1.5 w-24 overflow-hidden rounded-full bg-muted">
+        <span className="bg-green-500" style={{ width: `${(done / issues.length) * 100}%` }} />
+      </span>
+      {done}/{issues.length} done
+    </span>
+  );
+}
+
+function LaneAssignee({ agentId, agents }: { agentId: string | null; agents?: Agent[] }) {
+  const agent = agentId ? agents?.find((a) => a.id === agentId) : undefined;
+  return agent ? <AgentIdentity agent={agent} size="xs" /> : null;
+}
+
+// `wrap` puts the title under the key, up to two lines (Grid parent card).
+function LaneTitle({ lane, wrap = false }: { lane: KanbanLane; wrap?: boolean }) {
+  if (!lane.parentId) return <span className="font-medium">No Parent</span>;
+  const p = lane.parent;
+  return (
+    <Link
+      to={`/issues/${p?.identifier ?? lane.parentId}`}
+      disableIssueQuicklook
+      className={cn("flex min-w-0 gap-x-2 text-inherit no-underline hover:underline", wrap ? "flex-wrap items-center" : "items-center")}
+    >
+      {p ? <StatusIcon status={p.status} /> : null}
+      <span className="shrink-0 font-mono text-xs text-muted-foreground">{p?.identifier ?? lane.parentId.slice(0, 8)}</span>
+      {p ? <span className={cn("font-medium", wrap ? "mt-1 line-clamp-2 basis-full leading-snug" : "truncate")}>{p.title}</span> : null}
+    </Link>
+  );
+}
+
+// Board lane header: chevron, parent, sub-task count, owner, and progress.
+function LaneHeader({
+  lane,
+  open,
+  agents,
+  onToggle,
+}: {
+  lane: KanbanLane;
+  open: boolean;
+  agents?: Agent[];
+  onToggle: () => void;
+}) {
+  const Chevron = open ? ChevronDown : ChevronRight;
+  return (
+    <div className="flex items-center gap-2 py-2 text-sm">
+      <button
+        type="button"
+        className="text-muted-foreground hover:text-foreground"
+        onClick={onToggle}
+        aria-expanded={open}
+        aria-label={open ? "Fold lane" : "Open lane"}
+      >
+        <Chevron className="h-4 w-4" />
+      </button>
+      <LaneTitle lane={lane} />
+      <span className="shrink-0 text-xs text-muted-foreground">
+        ({lane.issues.length} {lane.parentId ? "sub-task" : "task"}{lane.issues.length === 1 ? "" : "s"})
+      </span>
+      <LaneAssignee agentId={lane.parent?.assigneeAgentId ?? null} agents={agents} />
+      <span className="ml-auto">
+        <LaneProgress issues={lane.issues} />
+      </span>
+    </div>
+  );
+}
+
+// Grid parent card: the parent task and its progress, left of its row.
+function ParentCard({ lane, agents }: { lane: KanbanLane; agents?: Agent[] }) {
+  return (
+    <div className="min-w-0 space-y-1.5 rounded-md border border-border bg-card p-2.5 text-sm">
+      <LaneTitle lane={lane} wrap />
+      <div className="flex items-center gap-2">
+        <LaneAssignee agentId={lane.parent?.assigneeAgentId ?? null} agents={agents} />
       </div>
+      <LaneProgress issues={lane.issues} />
     </div>
   );
 }
@@ -383,6 +533,12 @@ function KanbanCard({
 
 /* ── Main Board ── */
 
+/**
+ * Task board: one lane per parent task, one column per status, drag a card to
+ * change its status. `layout="board"` folds lanes where all tasks are done;
+ * `layout="grid"` puts the parent card on the left and Done as a short list.
+ * Used by the Board and Grid views in IssuesList.
+ */
 export function KanbanBoard({
   issues,
   agents,
@@ -391,32 +547,28 @@ export function KanbanBoard({
   collapsedStatuses = [],
   initialVisibleCount = KANBAN_COLUMN_INITIAL_VISIBLE_LIMIT,
   revealIncrement = KANBAN_COLUMN_REVEAL_INCREMENT,
+  layout = "board",
   onUpdateIssue,
 }: KanbanBoardProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [laneOpen, setLaneOpen] = useState<Record<string, boolean>>({});
   const paginationKey = `${initialVisibleCount}:${revealIncrement}`;
   const [visibleState, setVisibleState] = useState<{
     paginationKey: string;
     counts: Record<string, number>;
   }>({ paginationKey, counts: {} });
-  const visibleCountByStatus = visibleState.paginationKey === paginationKey ? visibleState.counts : {};
+  const visibleCountByCell = visibleState.paginationKey === paginationKey ? visibleState.counts : {};
   const collapsedStatusSet = useMemo(() => new Set(collapsedStatuses), [collapsedStatuses]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
 
-  const columnIssues = useMemo(() => {
-    const grouped: Record<IssueStatus, Issue[]> = {} as Record<IssueStatus, Issue[]>;
-    for (const status of boardStatuses) {
-      grouped[status] = [];
-    }
-    for (const issue of issues) {
-      if (grouped[issue.status]) {
-        grouped[issue.status].push(issue);
-      }
-    }
-    return grouped;
+  const lanes = useMemo(() => groupKanbanLanes(issues), [issues]);
+  const statusTotals = useMemo(() => {
+    const totals: Record<string, number> = {};
+    for (const issue of issues) totals[issue.status] = (totals[issue.status] ?? 0) + 1;
+    return totals;
   }, [issues]);
 
   const activeIssue = useMemo(
@@ -442,8 +594,7 @@ export function KanbanBoard({
     const issue = issues.find((i) => i.id === issueId);
     if (!issue) return;
 
-    // Determine target status: the "over" could be a column id (status string)
-    // or another card's id. Find which column the "over" belongs to.
+    // "over" is a lane cell, or a card in one. Dropping in another lane changes only the status.
     const targetStatus = resolveKanbanTargetStatus(over.id as string, issues);
 
     if (targetStatus && targetStatus !== issue.status) {
@@ -451,47 +602,83 @@ export function KanbanBoard({
     }
   }
 
-  function handleDragOver(_event: DragOverEvent) {
-    // Could be used for visual feedback; keeping simple for now
+  function renderCell(lane: KanbanLane, status: IssueStatus) {
+    const cellKey = `${lane.key}:${status}`;
+    return (
+      <LaneCell
+        key={status}
+        laneKey={lane.key}
+        status={status}
+        issues={lane.issues.filter((issue) => issue.status === status)}
+        agents={agents}
+        liveIssueIds={liveIssueIds}
+        subtreeLiveCounts={subtreeLiveCounts}
+        compactCards={compactCards}
+        collapsed={collapsedStatusSet.has(status)}
+        visibleCount={visibleCountByCell[cellKey] ?? initialVisibleCount}
+        revealIncrement={revealIncrement}
+        onShowMore={() => {
+          setVisibleState((current) => {
+            const counts = current.paginationKey === paginationKey ? current.counts : {};
+            return {
+              paginationKey,
+              counts: { ...counts, [cellKey]: (counts[cellKey] ?? initialVisibleCount) + revealIncrement },
+            };
+          });
+        }}
+      />
+    );
   }
 
+  const isGrid = layout === "grid";
+  const columns = isGrid ? "grid-cols-(--gtc-kanban-grid)" : "grid-cols-(--gtc-kanban-board)";
+
   return (
-    <DndContext
-      sensors={sensors}
-      onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
-      onDragEnd={handleDragEnd}
-    >
-      <div className="flex gap-3 overflow-x-auto pb-4 -mx-2 px-2">
-        {boardStatuses.map((status) => (
-          <KanbanColumn
-            key={status}
-            status={status}
-            issues={columnIssues[status] ?? []}
-            agents={agents}
-            liveIssueIds={liveIssueIds}
-            subtreeLiveCounts={subtreeLiveCounts}
-            compactCards={compactCards}
-            // Compact mode (any lane explicitly collapsed) also collapses
-            // empty lanes to the same labeled rail, so an empty In Progress
-            // reads like the other rails instead of a lone expanded column.
-            collapsed={collapsedStatusSet.has(status) || (collapsedStatusSet.size > 0 && columnIssues[status].length === 0)}
-            visibleCount={visibleCountByStatus[status] ?? initialVisibleCount}
-            revealIncrement={revealIncrement}
-            onShowMore={() => {
-              setVisibleState((current) => {
-                const counts = current.paginationKey === paginationKey ? current.counts : {};
-                return {
-                  paginationKey,
-                  counts: {
-                    ...counts,
-                    [status]: (counts[status] ?? initialVisibleCount) + revealIncrement,
-                  },
-                };
-              });
-            }}
-          />
-        ))}
+    <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <div className="pb-4">
+        {/* Negative top matches the page's padding, so the header pins at the scroll edge. */}
+        <div className={cn("sticky -top-4 z-10 grid gap-2 border-b border-border bg-background py-2 md:-top-6", columns)}>
+          {isGrid ? (
+            <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Parent Task</span>
+          ) : null}
+          {kanbanLaneStatuses.map((status) => (
+            <span
+              key={status}
+              className={cn("flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide", getKanbanColumnTone(status).header)}
+            >
+              <StatusIcon status={status} />
+              {statusLabel(status)}
+              <span className="font-normal tabular-nums text-muted-foreground">{statusTotals[status] ?? 0}</span>
+            </span>
+          ))}
+        </div>
+        {lanes.map((lane) => {
+          if (isGrid) {
+            return (
+              <div key={lane.key} className={cn("grid gap-2 border-b border-border/60 py-2.5", columns)}>
+                <ParentCard lane={lane} agents={agents} />
+                {gridOpenStatuses.map((status) => renderCell(lane, status))}
+                <DoneList laneKey={lane.key} issues={lane.issues.filter((issue) => issue.status === "done")} />
+              </div>
+            );
+          }
+          const open = laneOpen[lane.key] ?? laneIsOpen(lane);
+          return (
+            <section key={lane.key} className="border-b border-border/60">
+              <LaneHeader
+                lane={lane}
+                open={open}
+                agents={agents}
+                onToggle={() => setLaneOpen((current) => ({ ...current, [lane.key]: !open }))}
+              />
+              {open ? (
+                <div className={cn("grid gap-2 pb-3", columns)}>
+                  {kanbanLaneStatuses.map((status) => renderCell(lane, status))}
+                </div>
+              ) : null}
+            </section>
+          );
+        })}
       </div>
       <DragOverlay>
         {activeIssue ? (

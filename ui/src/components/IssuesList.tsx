@@ -72,7 +72,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { CircleDot, Plus, ArrowUpDown, Layers, Check, ChevronRight, List, ListTree, User, Search, CircleSlash2, ChevronsDownUp, PanelTopClose, RotateCcw, ListCollapse,
-  SquareKanban,
+  Columns3, LayoutGrid,
 } from "lucide-react";
 import {
   KanbanBoard,
@@ -163,7 +163,7 @@ export type IssueViewState = IssueFilterState & {
   sortField: IssueSortField;
   sortDir: "asc" | "desc";
   groupBy: "status" | "priority" | "assignee" | "project" | "workspace" | "parent" | "none";
-  viewMode: "list" | "board";
+  viewMode: "list" | "board" | "grid";
   nestingEnabled: boolean;
   showDateGroupSeparators: boolean;
   collapsedGroups: string[];
@@ -215,7 +215,7 @@ function normalizeIssueViewState(value: unknown): IssueViewState {
     groupBy: ["status", "priority", "assignee", "project", "workspace", "parent", "none"].includes(parsed.groupBy ?? "")
       ? parsed.groupBy as IssueViewState["groupBy"]
       : defaultViewState.groupBy,
-    viewMode: parsed.viewMode === "board" ? "board" : "list",
+    viewMode: parsed.viewMode === "board" || parsed.viewMode === "grid" ? parsed.viewMode : "list",
     nestingEnabled: parsed.nestingEnabled !== false,
     showDateGroupSeparators: parsed.showDateGroupSeparators !== false,
     collapsedGroups: Array.isArray(parsed.collapsedGroups)
@@ -799,6 +799,8 @@ function StreamlinedIssuesList({
   const [viewState, setViewState] = useState<IssueViewState>(() =>
     getInitialWorkspaceViewState(initialPreferences, initialAssignees, initialWorkspaces, defaultSortField),
   );
+  // Board and Grid share the per-status data load and the board controls.
+  const isBoardView = viewState.viewMode !== "list";
   const [assigneePickerIssueId, setAssigneePickerIssueId] = useState<string | null>(null);
   const [assigneeSearch, setAssigneeSearch] = useState("");
   const [issueSearch, setIssueSearch] = useState(initialSearch ?? "");
@@ -911,7 +913,7 @@ function StreamlinedIssuesList({
           limit: ISSUE_BOARD_COLUMN_RESULT_LIMIT,
           ...(enableRoutineVisibilityFilter ? { includeRoutineExecutions: true } : {}),
         }, { signal }).then((rows) => rows as Issue[]),
-      enabled: !!selectedCompanyId && viewState.viewMode === "board" && !searchWithinLoadedIssues,
+      enabled: !!selectedCompanyId && isBoardView && !searchWithinLoadedIssues,
       placeholderData: (previousData: Issue[] | undefined) => previousData,
     })),
   });
@@ -1119,7 +1121,7 @@ function StreamlinedIssuesList({
   }, [issues]);
 
   const boardIssues = useMemo(() => {
-    if (viewState.viewMode !== "board" || searchWithinLoadedIssues) return null;
+    if (!isBoardView || searchWithinLoadedIssues) return null;
     const merged = new Map<string, Issue>();
     let isPending = false;
     for (const query of boardIssueQueries) {
@@ -1130,13 +1132,13 @@ function StreamlinedIssuesList({
     }
     if (merged.size > 0) return [...merged.values()];
     return isPending ? issues : [];
-  }, [boardIssueQueries, issues, searchWithinLoadedIssues, viewState.viewMode]);
+  }, [boardIssueQueries, issues, isBoardView, searchWithinLoadedIssues]);
   const boardColumnLimitReached = useMemo(
     () =>
-      viewState.viewMode === "board" &&
+      isBoardView &&
       !searchWithinLoadedIssues &&
       boardIssueQueries.some((query) => (query.data?.length ?? 0) === ISSUE_BOARD_COLUMN_RESULT_LIMIT),
-    [boardIssueQueries, searchWithinLoadedIssues, viewState.viewMode],
+    [boardIssueQueries, isBoardView, searchWithinLoadedIssues],
   );
 
   const sourceIssues = useMemo(() => {
@@ -1247,7 +1249,7 @@ function StreamlinedIssuesList({
   });
 
   const activeFilterCount = countActiveIssueFilters(viewState, enableRoutineVisibilityFilter);
-  const boardHighVolume = viewState.viewMode === "board" && filtered.length > KANBAN_BOARD_HIGH_VOLUME_THRESHOLD;
+  const boardHighVolume = isBoardView && filtered.length > KANBAN_BOARD_HIGH_VOLUME_THRESHOLD;
   const boardCompactCards =
     viewState.boardCardDensity === "compact"
     || (viewState.boardCardDensity === "auto" && boardHighVolume);
@@ -1748,24 +1750,22 @@ function StreamlinedIssuesList({
           <>
           {/* View mode toggle */}
           <div className="flex items-center border border-border rounded-md overflow-hidden mr-1" role="group" aria-label="View mode">
-            <button
-              className={`flex h-8 w-8 items-center justify-center transition-colors ${viewState.viewMode === "list" ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => updateView({ viewMode: "list" })}
-              title="List view"
-              aria-label="List view"
-              aria-pressed={viewState.viewMode === "list"}
-            >
-              <List className="h-3.5 w-3.5" />
-            </button>
-            <button
-              className={`flex h-8 w-8 items-center justify-center transition-colors ${viewState.viewMode === "board" ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => updateView({ viewMode: "board" })}
-              title="Board view"
-              aria-label="Board view"
-              aria-pressed={viewState.viewMode === "board"}
-            >
-              <SquareKanban className="h-3.5 w-3.5" />
-            </button>
+            {([
+              ["list", "List", List],
+              ["board", "Board", Columns3],
+              ["grid", "Grid", LayoutGrid],
+            ] as const).map(([mode, label, Icon]) => (
+              <button
+                key={mode}
+                className={`flex h-8 items-center gap-1.5 px-2.5 text-xs transition-colors ${viewState.viewMode === mode ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                onClick={() => updateView({ viewMode: mode })}
+                title={`${label} view`}
+                aria-pressed={viewState.viewMode === mode}
+              >
+                <Icon className="h-3.5 w-3.5" />
+                {label}
+              </button>
+            ))}
           </div>
 
           {viewState.viewMode === "list" && (
@@ -1781,7 +1781,7 @@ function StreamlinedIssuesList({
             </Button>
           )}
 
-          {viewState.viewMode === "board" && (
+          {isBoardView && (
             <>
               <Button
                 type="button"
@@ -1996,8 +1996,9 @@ function StreamlinedIssuesList({
         />
       )}
 
-      {viewState.viewMode === "board" ? (
+      {isBoardView ? (
         <KanbanBoard
+          layout={viewState.viewMode === "grid" ? "grid" : "board"}
           issues={filtered}
           agents={agents}
           liveIssueIds={liveIssueIds}
