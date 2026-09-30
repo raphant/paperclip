@@ -23,6 +23,11 @@ export function resolveClaudeModel(
 
 export const type = "claude_local";
 
+/**
+ * Effort levels the agent form offers for a Claude model id (Bedrock/Vertex prefixes and `[1m]` ignored).
+ * Haiku gets none; the 4.6 models get no `xhigh`. An id we don't know yet (a newer model) gets
+ * low..xhigh but not `max`, so new models are usable before this list learns them.
+ */
 export function claudeLocalReasoningEffortsForModel(model: string): readonly string[] {
   const id = model.trim().replace(/\[1m\]$/, "").replace(/^(?:(?:us|eu|apac|global)\.)?anthropic\./, "");
   if (/^claude-haiku-/.test(id)) return [];
@@ -30,7 +35,7 @@ export function claudeLocalReasoningEffortsForModel(model: string): readonly str
     return ["low", "medium", "high", "xhigh", "max"];
   }
   if (/^claude-(?:opus|sonnet)-4-6(?:-v1)?$/.test(id)) return ["low", "medium", "high", "max"];
-  return ["low", "medium", "high"];
+  return ["low", "medium", "high", "xhigh"];
 }
 export const label = "Claude Code";
 
@@ -60,7 +65,7 @@ Core fields:
 - cwd (string, optional): default absolute working directory fallback for the agent process (created if missing when possible)
 - instructionsFilePath (string, optional): absolute path to a markdown instructions file injected at runtime
 - model (string, optional): Claude model id. Missing or blank defaults to ${DEFAULT_CLAUDE_LOCAL_MODEL} in both CLI and ACP, including existing agents. Explicit model IDs and ANTHROPIC_MODEL overrides are preserved. Bedrock/Vertex without an explicit model retain their provider default.
-- effort (string, optional): model-specific reasoning effort passed via --effort (low|medium|high; current Opus, Sonnet 5, and Fable models also support xhigh|max)
+- effort (string, optional): model-specific reasoning effort passed via --effort (low|medium|high; current Opus, Sonnet 5, Fable, and unknown newer models also support xhigh; the known current models also support max)
 - chrome (boolean, optional): pass --chrome when running Claude
 - promptTemplate (string, optional): run prompt template
 - maxTurnsPerRun (number, optional): max turns for one run

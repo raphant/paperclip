@@ -13,7 +13,11 @@ describe("Claude model defaults", () => {
     expect(claudeLocalReasoningEffortsForModel("claude-sonnet-5")).toContain("max");
     expect(claudeLocalReasoningEffortsForModel("claude-sonnet-4-6")).toEqual(["low", "medium", "high", "max"]);
     expect(claudeLocalReasoningEffortsForModel("claude-haiku-4-5")).toEqual([]);
-    expect(claudeLocalReasoningEffortsForModel("custom-model")).toEqual(["low", "medium", "high"]);
+    expect(claudeLocalReasoningEffortsForModel("claude-opus-4-6")).toEqual(["low", "medium", "high", "max"]);
+  });
+
+  it.each(["claude-sonnet-5-5", "custom-model"])("offers low..xhigh but not max for an unknown model id (%s)", (model) => {
+    expect(claudeLocalReasoningEffortsForModel(model)).toEqual(["low", "medium", "high", "xhigh"]);
   });
 
   it.each([undefined, null, "", "  "])("uses Opus 5 for an unset model (%j)", (model) => {
