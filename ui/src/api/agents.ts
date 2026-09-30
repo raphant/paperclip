@@ -204,10 +204,12 @@ export const agentsApi = {
   adapterModels: (
     companyId: string,
     type: string,
-    options?: { refresh?: boolean; environmentId?: string | null; provider?: string },
+    options?: { refresh?: boolean; environmentId?: string | null; provider?: string; agentId?: string | null },
   ) => {
     const params = new URLSearchParams();
     if (options?.refresh) params.set("refresh", "1");
+    // On refresh, the server lists models through this agent's AI connection.
+    if (options?.agentId) params.set("agentId", options.agentId);
     if (options?.provider) params.set("provider", options.provider);
     if (options?.environmentId) params.set("environmentId", options.environmentId);
     const query = params.size > 0 ? `?${params.toString()}` : "";

@@ -3251,11 +3251,36 @@ export function agentRoutes(
       res.json(requireServerAdapter(modelAdapterType).models ?? []);
       return;
     }
+    const agentId = asNonEmptyString(req.query.agentId);
+    const credential = refresh && type === "claude_local" && agentId
+      ? await agentAiCredentialForModels(req, companyId, agentId)
+      : undefined;
     const models = refresh
-      ? await refreshAdapterModels(modelAdapterType)
+      ? await refreshAdapterModels(modelAdapterType, credential)
       : await listAdapterModels(modelAdapterType);
     res.json(models);
   });
+
+  /**
+   * The credential of a `claude_local` agent's AI connection, so Refresh models
+   * can list what that login can use. Any failure returns undefined, and the
+   * adapter falls back to its usual list.
+   */
+  async function agentAiCredentialForModels(req: Request, companyId: string, agentId: string) {
+    try {
+      const agent = await svc.getById(agentId);
+      if (!agent || agent.companyId !== companyId || !agent.runtimeConfig?.aiConnection) return undefined;
+      const binding = aiConnectionBindingSchema.parse(agent.runtimeConfig.aiConnection);
+      if (binding.provider !== "anthropic") return undefined;
+      const config = parseObject(agent.adapterConfig);
+      const service = aiConnectionService(db);
+      const selection = await service.select({ companyId, agentId, userId: responsibleUserForAiRequest(req), adapterType: agent.adapterType, model: config.model, runnerProvider: config.provider, acpxAgent: config.acpxAgent, binding });
+      const token = await service.credential(selection);
+      return typeof token === "string" && token ? { token, method: selection.attribution.method } : undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
   router.get("/companies/:companyId/adapters/:type/detect-model", async (req, res) => {
     const companyId = req.params.companyId as string;

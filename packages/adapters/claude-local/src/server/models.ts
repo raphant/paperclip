@@ -6,6 +6,10 @@ const ANTHROPIC_MODELS_ENDPOINT = "/v1/models";
 const ANTHROPIC_MODELS_TIMEOUT_MS = 5000;
 const ANTHROPIC_MODELS_CACHE_TTL_MS = 60_000;
 const ANTHROPIC_API_VERSION = "2023-06-01";
+const ANTHROPIC_OAUTH_BETA = "oauth-2025-04-20";
+
+/** A Claude credential from an AI connection: a subscription OAuth token or an API key. */
+export type ClaudeModelsCredential = { token: string; method: "api_key" | "subscription" };
 
 /** AWS Bedrock model IDs — region-qualified identifiers required by the Bedrock API. */
 const BEDROCK_MODELS: AdapterModel[] = [
@@ -51,16 +55,22 @@ function dedupeModels(models: AdapterModel[]): AdapterModel[] {
   return deduped;
 }
 
+/** Anthropic lists some models by a dated id (`claude-haiku-4-5-20251001`); show those as our short id. */
+function toKnownModelId(id: string): string {
+  const shortId = id.replace(/-\d{8}$/, "");
+  return shortId !== id && DIRECT_MODELS.some((model) => model.id === shortId) ? shortId : id;
+}
+
 function mergedWithFallback(models: AdapterModel[]): AdapterModel[] {
   return dedupeModels([
-    ...models,
+    ...models.map((model) => ({ ...model, id: toKnownModelId(model.id.trim()) })),
     ...DIRECT_MODELS,
   ]);
 }
 
-function resolveAnthropicApiKey(): string | null {
+function resolveAnthropicCredential(): ClaudeModelsCredential | null {
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  return apiKey && apiKey.length > 0 ? apiKey : null;
+  return apiKey && apiKey.length > 0 ? { token: apiKey, method: "api_key" } : null;
 }
 
 function resolveAnthropicBaseUrl(): string {
@@ -68,14 +78,16 @@ function resolveAnthropicBaseUrl(): string {
   return baseUrl && baseUrl.length > 0 ? baseUrl.replace(/\/+$/, "") : "https://api.anthropic.com";
 }
 
-async function fetchAnthropicModels(apiKey: string, baseUrl: string): Promise<AdapterModel[]> {
+async function fetchAnthropicModels(credential: ClaudeModelsCredential, baseUrl: string): Promise<AdapterModel[]> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), ANTHROPIC_MODELS_TIMEOUT_MS);
   try {
     const response = await fetch(`${baseUrl}${ANTHROPIC_MODELS_ENDPOINT}`, {
       headers: {
         "anthropic-version": ANTHROPIC_API_VERSION,
-        "x-api-key": apiKey,
+        ...(credential.method === "subscription"
+          ? { Authorization: `Bearer ${credential.token}`, "anthropic-beta": ANTHROPIC_OAUTH_BETA }
+          : { "x-api-key": credential.token }),
       },
       signal: controller.signal,
     });
@@ -108,16 +120,21 @@ async function fetchAnthropicModels(apiKey: string, baseUrl: string): Promise<Ad
   }
 }
 
-async function loadClaudeModels(options?: { forceRefresh?: boolean }): Promise<AdapterModel[]> {
+async function loadClaudeModels(options?: {
+  forceRefresh?: boolean;
+  credential?: ClaudeModelsCredential;
+}): Promise<AdapterModel[]> {
   if (isBedrockEnv()) return dedupeModels(BEDROCK_MODELS);
 
   const fallback = dedupeModels(DIRECT_MODELS);
-  const apiKey = resolveAnthropicApiKey();
-  if (!apiKey) return fallback;
+  const credential = options?.credential?.token.trim()
+    ? { ...options.credential, token: options.credential.token.trim() }
+    : resolveAnthropicCredential();
+  if (!credential) return fallback;
 
   const now = Date.now();
   const baseUrl = resolveAnthropicBaseUrl();
-  const keyFingerprint = fingerprint(apiKey);
+  const keyFingerprint = fingerprint(credential.token);
   if (
     options?.forceRefresh !== true &&
     cached &&
@@ -128,7 +145,7 @@ async function loadClaudeModels(options?: { forceRefresh?: boolean }): Promise<A
     return cached.models;
   }
 
-  const fetched = await fetchAnthropicModels(apiKey, baseUrl);
+  const fetched = await fetchAnthropicModels(credential, baseUrl);
   if (fetched.length > 0) {
     const merged = mergedWithFallback(fetched);
     cached = {
@@ -156,8 +173,13 @@ export async function listClaudeModels(): Promise<AdapterModel[]> {
   return loadClaudeModels();
 }
 
-export async function refreshClaudeModels(): Promise<AdapterModel[]> {
-  return loadClaudeModels({ forceRefresh: true });
+/**
+ * Fetch the live model list, skipping the cache. The server passes the agent's
+ * AI connection credential; without one, `ANTHROPIC_API_KEY` is used as before.
+ * The URL always comes from the server env, never from the caller.
+ */
+export async function refreshClaudeModels(credential?: ClaudeModelsCredential): Promise<AdapterModel[]> {
+  return loadClaudeModels({ forceRefresh: true, credential });
 }
 
 export function resetClaudeModelsCacheForTests() {

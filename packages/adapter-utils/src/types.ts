@@ -468,9 +468,10 @@ export interface ServerAdapterModule {
    * Optional explicit refresh hook for model discovery.
    * Use this when the adapter caches discovered models and needs a bypass path
    * so the UI can fetch newly released models without waiting for cache expiry
-   * or a Paperclip code update.
+   * or a Paperclip code update. The server may pass the agent's AI connection
+   * credential; adapters that don't use one ignore it.
    */
-  refreshModels?: () => Promise<AdapterModel[]>;
+  refreshModels?: (credential?: { token: string; method: "api_key" | "subscription" }) => Promise<AdapterModel[]>;
   agentConfigurationDoc?: string;
   /**
    * Optional lifecycle hook when an agent is approved/hired (join-request or hire_agent approval).
