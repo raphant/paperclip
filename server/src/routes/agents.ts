@@ -3221,6 +3221,13 @@ export function agentRoutes(
     }
   });
 
+  /**
+   * The last list a Refresh got through an agent's AI connection, per company and
+   * adapter type, so every model picker in that company sees it. Memory only:
+   * after a restart, one Refresh fills it again.
+   */
+  const companyRefreshedModels = new Map<string, { id: string; label: string }[]>();
+
   router.get("/companies/:companyId/adapters/:type/models", async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
@@ -3255,9 +3262,11 @@ export function agentRoutes(
     const credential = refresh && type === "claude_local" && agentId
       ? await agentAiCredentialForModels(req, companyId, agentId)
       : undefined;
+    const sharedKey = `${companyId}:${modelAdapterType}`;
     const models = refresh
       ? await refreshAdapterModels(modelAdapterType, credential)
-      : await listAdapterModels(modelAdapterType);
+      : companyRefreshedModels.get(sharedKey) ?? await listAdapterModels(modelAdapterType);
+    if (refresh && credential) companyRefreshedModels.set(sharedKey, models);
     res.json(models);
   });
 

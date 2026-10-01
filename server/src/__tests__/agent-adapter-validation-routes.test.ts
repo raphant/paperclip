@@ -357,6 +357,32 @@ describe("agent routes adapter validation", () => {
     } finally { list.mockRestore(); refresh.mockRestore(); }
   });
 
+  it("shares a Refresh made through an agent's AI connection with the company's plain model list", async () => {
+    const adapters = await import("../adapters/index.js");
+    const aiConnections = await import("../services/ai-connections.js");
+    const list = vi.spyOn(adapters, "listAdapterModels").mockResolvedValue([{ id: "hardcoded", label: "hardcoded" }]);
+    const refresh = vi.spyOn(adapters, "refreshAdapterModels").mockResolvedValue([{ id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" }]);
+    const connections = vi.spyOn(aiConnections, "aiConnectionService").mockReturnValue({
+      select: vi.fn(async () => ({ attribution: { method: "subscription" } })),
+      credential: vi.fn(async () => "token"),
+    } as any);
+    mockAgentService.getById.mockResolvedValue({
+      ...(await mockAgentService.getById()),
+      adapterType: "claude_local",
+      runtimeConfig: { aiConnection: { provider: "anthropic", method: "subscription", mode: "responsible_user" } },
+    });
+    try {
+      const app = await createApp();
+      const plainList = (companyId: string) => requestApp(app, (baseUrl) => request(baseUrl).get(`/api/companies/${companyId}/adapters/claude_local/models`));
+      expect((await plainList("company-1")).body).toEqual([{ id: "hardcoded", label: "hardcoded" }]);
+      const refreshed = await requestApp(app, (baseUrl) => request(baseUrl).get("/api/companies/company-1/adapters/claude_local/models?refresh=1&agentId=11111111-1111-4111-8111-111111111111"));
+      expect(refreshed.body).toEqual([{ id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" }]);
+      expect(refresh).toHaveBeenCalledWith("claude_local", { token: "token", method: "subscription" });
+      expect((await plainList("company-1")).body).toEqual([{ id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" }]);
+      expect((await plainList("company-2")).body).toEqual([{ id: "hardcoded", label: "hardcoded" }]);
+    } finally { list.mockRestore(); refresh.mockRestore(); connections.mockRestore(); }
+  });
+
   it("creates agents for dynamically registered external adapter types", async () => {
     const { registerServerAdapter } = await import("../adapters/index.js");
     registerServerAdapter(externalAdapter);

@@ -1253,8 +1253,9 @@ export function AgentConfigForm(props: AgentConfigFormProps) {
     setRefreshingModels(true);
     setRefreshModelsError(null);
     try {
-      const refreshed = await agentsApi.adapterModels(selectedCompanyId, adapterType, { refresh: true, environmentId: currentDefaultEnvironmentId || null, provider: modelProvider, agentId: editAgentId });
-      queryClient.setQueryData(modelQueryKey, refreshed);
+      await agentsApi.adapterModels(selectedCompanyId, adapterType, { refresh: true, environmentId: currentDefaultEnvironmentId || null, provider: modelProvider, agentId: editAgentId });
+      // The server keeps the refreshed list for the company, so every model picker re-reads it.
+      await queryClient.invalidateQueries({ queryKey: ["agents", selectedCompanyId, "adapter-models"] });
     } catch (error) {
       setRefreshModelsError(error instanceof Error ? error.message : "Failed to refresh adapter models.");
     } finally {
