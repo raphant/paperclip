@@ -380,6 +380,8 @@ describe("agent routes adapter validation", () => {
       expect(refresh).toHaveBeenCalledWith("claude_local", { token: "token", method: "subscription" });
       expect((await plainList("company-1")).body).toEqual([{ id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" }]);
       expect((await plainList("company-2")).body).toEqual([{ id: "hardcoded", label: "hardcoded" }]);
+      const codexList = await requestApp(app, (baseUrl) => request(baseUrl).get("/api/companies/company-1/adapters/codex_local/models"));
+      expect(codexList.body).toEqual([{ id: "hardcoded", label: "hardcoded" }]);
     } finally { list.mockRestore(); refresh.mockRestore(); connections.mockRestore(); }
   });
 
