@@ -32,6 +32,10 @@ import {
 } from "@/components/task-chat/TaskChatTurnStatusIsland";
 import { commentsToTaskChatItems } from "@/components/task-chat/task-chat-adapter";
 import {
+  taskChatStatusRelevance,
+  withoutHistoricalRunStatus,
+} from "@/components/task-chat/status-relevance";
+import {
   assembleThreadItems,
   attachSettledTurns,
   buildTurnSummary,
@@ -782,6 +786,15 @@ export function TaskChatThread(props: TaskChatThreadProps) {
     return map;
   }, [linkedRuns]);
 
+  const statusRelevance = useMemo(
+    () => taskChatStatusRelevance(issueStatus, [
+      ...(linkedRuns ?? []).map((run) => ({ ...run, id: run.runId })),
+      ...(liveRuns ?? []),
+      ...(activeRun ? [activeRun] : []),
+    ], props.recoveryAction),
+    [issueStatus, linkedRuns, liveRuns, activeRun, props.recoveryAction],
+  );
+
   const verificationCaveatsByRunId = useMemo(() => {
     const map = new Map<
       string,
@@ -800,6 +813,7 @@ export function TaskChatThread(props: TaskChatThreadProps) {
   const projectedComments = useMemo(
     () =>
       comments.flatMap((comment) => {
+        if (statusRelevance.isHistoricalNotice(comment)) return [];
         if (isRedundantAiRecoveryNotice(comment, interactions)) return [];
         if (comment.body !== LEGACY_WITHHELD_RUN_COMMENT || !comment.runId)
           return [comment];
@@ -813,7 +827,7 @@ export function TaskChatThread(props: TaskChatThreadProps) {
         const summary = acceptedSemanticResultSummary(resultJson);
         return [summary ? { ...comment, body: summary } : comment];
       }),
-    [comments, interactions, linkedRunMetaById],
+    [comments, interactions, linkedRunMetaById, statusRelevance],
   );
 
   const commentItems = useMemo(
@@ -1013,7 +1027,7 @@ export function TaskChatThread(props: TaskChatThreadProps) {
   // backbone chronologically at its start time (PAP-367).
   const lastCommentIdByRun = useMemo(() => {
     const map = new Map<string, string>();
-    for (const comment of comments) {
+    for (const comment of projectedComments) {
       if (comment.deletedAt || !comment.runId || !comment.id) continue;
       map.set(comment.runId, comment.id);
     }
@@ -1021,14 +1035,14 @@ export function TaskChatThread(props: TaskChatThreadProps) {
     // Same-turn steering splits that causal interval into timestamped segments,
     // so each segment must stay unanchored and interleave around the injected
     // human bubble through the chronological assembler.
-    for (const comment of comments) {
+    for (const comment of projectedComments) {
       const runId = comment.steeredIntoRunId;
       if (!comment.deletedAt && runId && comment.conversationAnchorAt) {
         map.delete(runId);
       }
     }
     return map;
-  }, [comments]);
+  }, [projectedComments]);
 
   const steeringAnchorsByRun = useMemo(() => {
     const map = new Map<string, number[]>();
@@ -1439,6 +1453,7 @@ export function TaskChatThread(props: TaskChatThreadProps) {
       if (liveRun && source.id === liveRun.id) continue;
       const entries = transcriptByRun.get(source.id) ?? [];
       const meta = linkedRunMetaById.get(source.id);
+      const historical = statusRelevance.isHistoricalRun(source.id);
       // A workspace admission attempt never started provider work. Its live
       // successor owns the waiting indicator; retain this attempt in the run log.
       if (source.status === "cancelled" && meta?.errorCode === "workspace_busy") {
@@ -1470,11 +1485,12 @@ export function TaskChatThread(props: TaskChatThreadProps) {
         entries.length === 0 &&
         !lastCommentIdByRun.has(source.id);
       if (executionWait) {
+        settledRunIds.add(source.id);
+        if (historical) continue;
         const wait = meta?.resultJson?.executionWait;
         const waitKey = wait && typeof wait === "object" && "recoveryActionId" in wait
           ? String(wait.recoveryActionId)
           : "execution_reconciliation_required";
-        settledRunIds.add(source.id);
         if (previousExecutionWaitKey !== waitKey) {
           const id = `${source.id}:execution-wait`;
           entriesWithFailures.push({
@@ -1519,7 +1535,7 @@ export function TaskChatThread(props: TaskChatThreadProps) {
       const progressCommentIds = semanticProgressCommentIds(meta?.resultJson);
       const sourcePresentationCommentId =
         decidedCommentId === undefined
-          ? ([...comments]
+          ? ([...projectedComments]
               .reverse()
               .find(
                 (comment) =>
@@ -1528,7 +1544,7 @@ export function TaskChatThread(props: TaskChatThreadProps) {
                   !progressCommentIds.has(comment.id),
               )?.id ?? null)
           : decidedCommentId !== null &&
-              comments.some(
+              projectedComments.some(
                 (comment) =>
                   !comment.deletedAt &&
                   comment.runId === source.id &&
@@ -1538,7 +1554,7 @@ export function TaskChatThread(props: TaskChatThreadProps) {
             : null;
       const sourceHasPresentationComment = sourcePresentationCommentId !== null;
       const sourcePresentationText = sourcePresentationCommentId
-        ? (comments.find(
+        ? (projectedComments.find(
             (comment) => comment.id === sourcePresentationCommentId,
           )?.body ?? null)
         : null;
@@ -1605,7 +1621,7 @@ export function TaskChatThread(props: TaskChatThreadProps) {
           : undefined;
         const finishedAt =
           meta?.finishedAt ?? meta?.startedAt ?? meta?.createdAt;
-        entriesWithFailures.push({
+        if (!historical) entriesWithFailures.push({
           ms: toMs(finishedAt),
           order: 3,
           id,
@@ -1663,7 +1679,7 @@ export function TaskChatThread(props: TaskChatThreadProps) {
             ? `Workspace setup failed before the agent started. ${retryDetail}`
             : `The run failed (${code}). ${retryDetail}`;
         const id = `${source.id}:failure`;
-        entriesWithFailures.push({
+        if (!historical) entriesWithFailures.push({
           ms: toMs(meta?.finishedAt ?? meta?.startedAt ?? meta?.createdAt),
           order: 3,
           id,
@@ -1712,6 +1728,7 @@ export function TaskChatThread(props: TaskChatThreadProps) {
               id: turnId,
               kind: "turn",
               settled: true,
+              historical,
               agentName:
                 meta?.agentName ??
                 (meta?.agentId ? agentMap?.get(meta.agentId)?.name : undefined),
@@ -1737,7 +1754,7 @@ export function TaskChatThread(props: TaskChatThreadProps) {
         } else if (!sourceHasNativeStop && !sourceHasLegacyStop && !lastCommentIdByRun.has(source.id)) {
           settledRunIds.add(source.id);
           const id = `${source.id}:terminal-notice`;
-          entriesWithFailures.push({
+          if (!historical) entriesWithFailures.push({
             ms: toMs(meta?.finishedAt ?? meta?.startedAt ?? meta?.createdAt),
             order: 3,
             id,
@@ -1769,7 +1786,7 @@ export function TaskChatThread(props: TaskChatThreadProps) {
         !sourceHasNativeResponse
       ) {
         const id = `${source.id}:terminal-notice`;
-        entriesWithFailures.push({
+        if (!historical) entriesWithFailures.push({
           ms: toMs(meta?.finishedAt ?? meta?.startedAt ?? meta?.createdAt),
           order: 3,
           id,
@@ -1805,12 +1822,13 @@ export function TaskChatThread(props: TaskChatThreadProps) {
           source.id === planDocumentSourceRunId && planTurnItem
             ? embedPlanDocumentAtWriteBoundary(parsedTranscript, planTurnItem)
             : parsedTranscript;
+        const visibleActivity = historical ? withoutHistoricalRunStatus(parsed) : parsed;
         return {
           segment,
           parsed,
           timelineItems: sourceIsPaperclipRunner
-            ? paperclipRunnerTimelineItems(parsed)
-            : parsed,
+            ? paperclipRunnerTimelineItems(visibleActivity)
+            : visibleActivity,
         };
       });
       const sourceResponseText =
@@ -1890,6 +1908,7 @@ export function TaskChatThread(props: TaskChatThreadProps) {
             id: turnId,
             kind: "turn",
             settled: true,
+            historical,
             agentName:
               meta?.agentName ??
               (meta?.agentId ? agentMap?.get(meta.agentId)?.name : undefined),
@@ -2052,6 +2071,7 @@ export function TaskChatThread(props: TaskChatThreadProps) {
     };
   }, [
     orderedEntries,
+    statusRelevance,
     canRetryFailedRun,
     interactions,
     runs,
@@ -2060,6 +2080,7 @@ export function TaskChatThread(props: TaskChatThreadProps) {
     linkedRunMetaById,
     lastCommentIdByRun,
     comments,
+    projectedComments,
     steeringAnchorsByRun,
     legacyTimelineAnchorsByRun,
     hasBrief,
