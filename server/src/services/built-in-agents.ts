@@ -1284,7 +1284,12 @@ export function builtInAgentService(db: Db) {
 
   async function createOrResetRoutine(agent: Agent, definition: BuiltInAgentDefinition, existing: Routine | null, mode: "reconcile" | "reset") {
     const routine = definition.bundle!.routine;
-    const actor = { agentId: null, userId: "built-in-bundles" };
+    // No user here on purpose: the routine service takes the actor's user as the
+    // routine's responsible user, and scheduled runs act for that user. A system
+    // marker is no company member, so every run got 403 RESPONSIBLE_USER_UNAVAILABLE.
+    // A null user falls back to the company's default responsible user.
+    // Provenance stays in originKind/originId and the activity log below.
+    const actor = { agentId: null, userId: null };
     const nextRoutine = existing
       ? await routineSvc.update(existing.id, {
         title: routine.title,

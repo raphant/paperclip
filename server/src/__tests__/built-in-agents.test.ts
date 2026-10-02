@@ -647,6 +647,9 @@ describeEmbeddedPostgres("built-in agents", () => {
       title: "Review recent agent trajectories for coaching proposals",
       status: "paused",
       assigneeAgentId: state.agentId,
+      // A real company user, never the system marker: scheduled runs act on
+      // behalf of this user, and a non-member denies every company call.
+      responsibleUserId: "responsible-user",
     });
     const [trigger] = await db.select().from(routineTriggers).where(eq(routineTriggers.routineId, routine!.id));
     expect(trigger).toMatchObject({
