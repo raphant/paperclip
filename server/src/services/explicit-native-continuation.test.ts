@@ -525,6 +525,23 @@ const support = await getEmbeddedPostgresTestSupport();
     expect(await admit(f)).toMatchObject({ previousRunId: f.sourceRunId });
   });
 
+  it("keeps provider diagnostics out of admission evidence and preserves absent results", async () => {
+    const f = await seedCancelledStartup();
+    const heartbeat = heartbeatService(db);
+    await db.update(heartbeatRuns).set({ resultJson: {
+      stopReason: "issue_continuation_waiting_on_review", timeoutSource: "stale_queued_run_gate",
+      summary: "private provider output", providerPayload: "large provider output".repeat(10000),
+    } }).where(eq(heartbeatRuns.id, f.sourceRunId));
+    const projected = await heartbeat.getRun(f.sourceRunId, { includeExecutionEvidence: true });
+    expect(projected?.resultJson).toMatchObject({ stopReason: "issue_continuation_waiting_on_review", timeoutSource: "stale_queued_run_gate" });
+    expect(projected?.resultJson).not.toHaveProperty("summary");
+    expect(projected?.resultJson).not.toHaveProperty("providerPayload");
+    await db.update(heartbeatRuns).set({ resultJson: null }).where(eq(heartbeatRuns.id, f.sourceRunId));
+    expect((await heartbeat.getRun(f.sourceRunId, { includeExecutionEvidence: true }))?.resultJson).toBeNull();
+    await db.update(heartbeatRuns).set({ resultJson: { unrecognizedReceipt: true } }).where(eq(heartbeatRuns.id, f.sourceRunId));
+    expect((await heartbeat.getRun(f.sourceRunId, { includeExecutionEvidence: true }))?.resultJson).not.toBeNull();
+  });
+
   it.each(["attempt", "generation", "controller", "lease", "process", "launch", "provider", "cleanup", "remote", "preparing", "closed", "reassigned"])(
     "retains cancellation safeguards with %s evidence", async kind => {
       const f = await seedCancelledStartup();
