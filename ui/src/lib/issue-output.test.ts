@@ -7,6 +7,7 @@ import {
   getOutputFileGlyph,
   getPromotedOutputAttachmentIds,
   isOutputEligibleContentType,
+  isHtmlLikeOutput,
   isImageLikeOutput,
 } from "./issue-output";
 
@@ -124,6 +125,8 @@ describe("isOutputEligibleContentType", () => {
     expect(isOutputEligibleContentType("application/wasm")).toBe(true);
     expect(isOutputEligibleContentType("application/octet-stream")).toBe(true);
     expect(isOutputEligibleContentType("application/octet-stream", "build.bin")).toBe(true);
+    // HTML renders live through HtmlArtifactFrame.
+    expect(isOutputEligibleContentType("text/html")).toBe(true);
   });
 
   it("filters document-like and source formats out of outputs", () => {
@@ -131,7 +134,6 @@ describe("isOutputEligibleContentType", () => {
     expect(isOutputEligibleContentType("text/plain")).toBe(false);
     expect(isOutputEligibleContentType("application/json")).toBe(false);
     expect(isOutputEligibleContentType("application/vnd.api+json")).toBe(false);
-    expect(isOutputEligibleContentType("text/html")).toBe(false);
     expect(isOutputEligibleContentType("application/xml")).toBe(false);
     expect(isOutputEligibleContentType("text/csv")).toBe(false);
     expect(isOutputEligibleContentType("application/x-yaml")).toBe(false);
@@ -245,5 +247,16 @@ describe("isImageLikeOutput", () => {
     expect(isImageLikeOutput("text/plain", "cover.png")).toBe(false);
     expect(isImageLikeOutput("application/octet-stream", "archive.zip")).toBe(false);
     expect(isImageLikeOutput("application/octet-stream", "image.heic")).toBe(false);
+  });
+});
+
+describe("isHtmlLikeOutput", () => {
+  it("recognizes HTML by MIME type, or by filename when the MIME type is missing or generic", () => {
+    expect(isHtmlLikeOutput("text/html; charset=utf-8", "chart.txt")).toBe(true);
+    expect(isHtmlLikeOutput("application/xhtml+xml", null)).toBe(true);
+    expect(isHtmlLikeOutput("application/octet-stream", "Chart.HTML")).toBe(true);
+    expect(isHtmlLikeOutput("", "page.htm")).toBe(true);
+    expect(isHtmlLikeOutput("text/plain", "page.html")).toBe(false);
+    expect(isHtmlLikeOutput("application/octet-stream", "page.md")).toBe(false);
   });
 });

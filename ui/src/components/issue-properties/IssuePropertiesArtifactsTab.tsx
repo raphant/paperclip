@@ -33,7 +33,8 @@ import {
   workProductHref,
 } from "@/lib/issue-artifacts";
 import { MediaArtifactCard } from "@/components/artifacts/MediaArtifactCard";
-import { isImageLikeOutput, isVideoLikeOutput } from "@/lib/issue-output";
+import { isHtmlLikeOutput, isImageLikeOutput, isVideoLikeOutput } from "@/lib/issue-output";
+import { HtmlArtifactFrame } from "@/components/artifacts/HtmlArtifactFrame";
 import { attachmentDownloadPath, attachmentOpenPath } from "@/lib/issue-attachments";
 import { MarkdownBody } from "@/components/MarkdownBody";
 import { RichWorkProductCard } from "@/components/task-chat/RichWorkProductCard";
@@ -516,7 +517,10 @@ export function IssuePropertiesArtifactsTab({ issue, documentDeepLink, onOpenDoc
                   );
                 }
                 return (
-                  <li key={row.id} className="col-span-full min-w-0">
+                  <li key={row.id} className="col-span-full flex min-w-0 flex-col gap-1.5">
+                    {isHtmlLikeOutput(attachment.contentType, filename) ? (
+                      <HtmlArtifactFrame contentPath={attachment.contentPath} title={filename} />
+                    ) : null}
                     <a href={attachmentOpenPath(attachment)} target="_blank" rel="noreferrer" className={cn(ROW_CLASS, "hover:bg-accent/50")}>
                       <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       <span className="min-w-0 flex-1 truncate">{attachment.originalFilename ?? attachment.objectKey}</span>

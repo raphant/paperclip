@@ -3,6 +3,7 @@ import type { IssueWorkProduct } from "@paperclipai/shared";
 import {
   formatBytes,
   getIssueOutputs,
+  isHtmlLikeOutput,
   isImageContentType,
   isVideoLikeOutput,
   outputFilename,
@@ -105,8 +106,9 @@ function OutputMediaPreview({
  * Issue Output surface (PAP-10162 Phase 3).
  *
  * Renders attachment-backed artifact work products as first-class issue
- * outputs: a full-width primary card (video player / image / generic file) with
- * Open + Download, plus compact rows for any additional outputs. The section is
+ * outputs: a full-width primary card (video player / image / live HTML / generic
+ * file) with Open + Download, plus compact rows for any additional outputs (an
+ * HTML output gets a full card, so it renders live). The section is
  * omitted entirely when the issue has produced no outputs — we never show a
  * permanent empty card.
  */
@@ -151,7 +153,11 @@ export function IssueOutputSection({ workProducts, resolveCreatorName, onMediaCl
           ) : null}
           {fileRest.map((item) => (
             <div key={item.id} id={`work-product-${item.id}`} className="scroll-mt-20">
-              <OutputRow item={item} creatorName={creatorFor(item)} />
+              {item.metadata && isHtmlLikeOutput(item.metadata.contentType, item.metadata.originalFilename) ? (
+                <OutputPrimaryCard item={item} creatorName={creatorFor(item)} />
+              ) : (
+                <OutputRow item={item} creatorName={creatorFor(item)} />
+              )}
             </div>
           ))}
         </div>

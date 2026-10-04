@@ -7,7 +7,8 @@ import { FoldCurtain } from "./FoldCurtain";
 import { MarkdownBody } from "./MarkdownBody";
 import { OutputFileTile } from "./issue-output/OutputFileTile";
 import { OutputVideoPlayer } from "./issue-output/OutputVideoPlayer";
-import { formatBytes } from "@/lib/issue-output";
+import { HtmlArtifactFrame } from "./artifacts/HtmlArtifactFrame";
+import { formatBytes, isHtmlLikeOutput } from "@/lib/issue-output";
 import {
   attachmentDownloadPath,
   attachmentFilename,
@@ -178,6 +179,30 @@ function VideoAttachmentCard({
   );
 }
 
+function HtmlAttachmentCard({
+  attachment,
+  onDelete,
+  deletePending,
+}: {
+  attachment: IssueAttachment;
+  onDelete?: (attachmentId: string) => void;
+  deletePending?: boolean;
+}) {
+  const filename = attachmentFilename(attachment);
+  return (
+    <Card id={`attachment-${attachment.id}`} className="block scroll-mt-20 overflow-hidden py-0">
+      <HtmlArtifactFrame contentPath={attachment.contentPath} title={filename} className="rounded-none border-0" />
+      <div className="flex flex-col gap-2 p-3 md:flex-row md:items-center md:justify-between">
+        <div className="min-w-0">
+          <p className="break-words text-sm font-semibold text-foreground">{filename}</p>
+          <AttachmentMeta attachment={attachment} />
+        </div>
+        <AttachmentActions attachment={attachment} onDelete={onDelete} deletePending={deletePending} />
+      </div>
+    </Card>
+  );
+}
+
 function GenericAttachmentRow({
   attachment,
   onDelete,
@@ -224,16 +249,18 @@ export function IssueAttachmentsSection({
   onDrop,
 }: IssueAttachmentsSectionProps) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const { imageAttachments, markdownAttachments, videoAttachments, genericAttachments } = useMemo(() => {
+  const { imageAttachments, markdownAttachments, videoAttachments, htmlAttachments, genericAttachments } = useMemo(() => {
     const images: IssueAttachment[] = [];
     const markdown: IssueAttachment[] = [];
     const videos: IssueAttachment[] = [];
+    const html: IssueAttachment[] = [];
     const generic: IssueAttachment[] = [];
 
     for (const attachment of attachments) {
       if (isImageAttachment(attachment)) images.push(attachment);
       else if (isMarkdownAttachment(attachment)) markdown.push(attachment);
       else if (isVideoAttachment(attachment)) videos.push(attachment);
+      else if (isHtmlLikeOutput(attachment.contentType, attachment.originalFilename)) html.push(attachment);
       else generic.push(attachment);
     }
 
@@ -241,6 +268,7 @@ export function IssueAttachmentsSection({
       imageAttachments: images,
       markdownAttachments: markdown,
       videoAttachments: videos,
+      htmlAttachments: html,
       genericAttachments: generic,
     };
   }, [attachments]);
@@ -362,6 +390,19 @@ export function IssueAttachmentsSection({
               onDelete={onDelete ? requestDelete : undefined}
               deletePending={deletePending}
               onPreview={onImageClick}
+            />
+          ))}
+        </div>
+      )}
+
+      {htmlAttachments.length > 0 && (
+        <div className="space-y-3">
+          {htmlAttachments.map((attachment) => (
+            <HtmlAttachmentCard
+              key={attachment.id}
+              attachment={attachment}
+              onDelete={onDelete ? requestDelete : undefined}
+              deletePending={deletePending}
             />
           ))}
         </div>

@@ -2,6 +2,8 @@ import { type SyntheticEvent, useEffect, useRef, useState } from "react";
 import { Download, ExternalLink, Paperclip, Play } from "lucide-react";
 import type { CompanyArtifact } from "@/api/artifacts";
 import { Link } from "@/lib/router";
+import { isHtmlLikeOutput } from "@/lib/issue-output";
+import { HtmlArtifactFrame } from "./HtmlArtifactFrame";
 import { cn, formatDate } from "@/lib/utils";
 
 interface ArtifactCardProps {
@@ -32,7 +34,7 @@ function PlaceholderPreview({ label }: { label?: string }) {
   );
 }
 
-type PreviewArtifact = Pick<CompanyArtifact, "mediaKind" | "contentPath" | "title"> & Partial<Pick<CompanyArtifact, "source" | "previewText">>;
+type PreviewArtifact = Pick<CompanyArtifact, "mediaKind" | "contentPath" | "title"> & Partial<Pick<CompanyArtifact, "source" | "previewText" | "contentType">>;
 
 function ImagePreview({ artifact }: { artifact: PreviewArtifact }) {
   const [errored, setErrored] = useState(false);
@@ -151,6 +153,13 @@ function TextPreview({ artifact }: { artifact: PreviewArtifact }) {
 }
 
 export function ArtifactPreview({ artifact }: { artifact: PreviewArtifact }) {
+  if (artifact.contentPath && isHtmlLikeOutput(artifact.contentType, artifact.title)) {
+    return (
+      <PreviewFrame>
+        <HtmlArtifactFrame thumbnail contentPath={artifact.contentPath} title={artifact.title} className="absolute inset-0" />
+      </PreviewFrame>
+    );
+  }
   switch (artifact.mediaKind) {
     case "image":
       return <ImagePreview key={artifact.contentPath} artifact={artifact} />;

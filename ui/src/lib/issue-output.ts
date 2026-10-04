@@ -167,6 +167,7 @@ export function isOutputEligibleContentType(
 ): boolean {
   const type = normalizeOutputContentType(contentType);
   if (!type) return false;
+  if (isHtmlLikeOutput(type, originalFilename)) return true;
   if (isDocumentLikeOutputContentType(type)) return false;
   if (GENERIC_BINARY_CONTENT_TYPES.has(type) && hasDocumentLikeFilename(originalFilename)) return false;
   return (
@@ -238,6 +239,23 @@ export function isImageLikeOutput(
   if (type && !GENERIC_BINARY_CONTENT_TYPES.has(type)) return false;
   const filename = (originalFilename ?? "").trim().toLowerCase();
   return IMAGE_FILENAME_EXTENSIONS.some((extension) => filename.endsWith(extension));
+}
+
+const HTML_CONTENT_TYPES = new Set(["text/html", "application/html", "application/xhtml+xml"]);
+
+/**
+ * HTML pages that `HtmlArtifactFrame` renders live. Like `isImageLikeOutput`,
+ * a missing or generic MIME type falls back to the `.html` / `.htm` filename.
+ */
+export function isHtmlLikeOutput(
+  contentType: string | null | undefined,
+  originalFilename?: string | null,
+): boolean {
+  const type = normalizeOutputContentType(contentType);
+  if (HTML_CONTENT_TYPES.has(type)) return true;
+  if (type && !GENERIC_BINARY_CONTENT_TYPES.has(type)) return false;
+  const filename = (originalFilename ?? "").trim().toLowerCase();
+  return filename.endsWith(".html") || filename.endsWith(".htm");
 }
 
 /**

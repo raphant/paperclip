@@ -1,5 +1,6 @@
 import { ArtifactPreview } from "@/components/artifacts/ArtifactCard";
-import { isVideoLikeOutput } from "@/lib/issue-output";
+import { HtmlArtifactFrame } from "@/components/artifacts/HtmlArtifactFrame";
+import { isHtmlLikeOutput, isVideoLikeOutput } from "@/lib/issue-output";
 import { AgentAvatar, type AvatarAgent } from "../AgentAvatar";
 import { useCallback, useContext, useState, type ReactNode } from "react";
 import { useEmailComment } from "@/components/EmailMessageCard";
@@ -306,6 +307,9 @@ function TaskChatBubbleContent({
           <span className="text-xs text-muted-foreground">
             Files · {attachmentRefs.length}
           </span>
+          {attachmentRefs
+            .filter((ref) => isHtmlLikeOutput(ref.contentType, ref.name))
+            .map((ref) => <HtmlArtifactFrame key={`html-${ref.url}`} contentPath={ref.url} title={ref.name} />)}
           <AttachmentGroup data-testid="task-chat-bubble-attachments">
             {attachmentRefs.map((ref) => {
               const kind = fileKindForAttachment(ref);

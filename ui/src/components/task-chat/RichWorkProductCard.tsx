@@ -2,8 +2,9 @@ import { useContext, useState, type CSSProperties } from "react";
 import { IssueGalleryContext } from "@/context/IssueGalleryContext";
 import { ArtifactPreview } from "@/components/artifacts/ArtifactCard";
 import { MediaArtifactCard } from "@/components/artifacts/MediaArtifactCard";
+import { HtmlArtifactFrame } from "@/components/artifacts/HtmlArtifactFrame";
 import { ImageGalleryModal } from "@/components/ImageGalleryModal";
-import { isImageLikeOutput, isVideoLikeOutput } from "@/lib/issue-output";
+import { isHtmlLikeOutput, isImageLikeOutput, isVideoLikeOutput } from "@/lib/issue-output";
 import { attachmentDownloadPath } from "@/lib/issue-attachments";
 import type { IssueWorkProduct } from "@paperclipai/shared";
 import {
@@ -245,7 +246,12 @@ export function RichWorkProductCard({ workProduct, href, variant = "card" }: Ric
     );
   }
 
-  return (
+  const htmlContentPath = workProduct.type === "artifact"
+    && isHtmlLikeOutput(contentType, stringMeta(metadata, "originalFilename") ?? workProduct.title)
+    ? artifactContentPath
+    : null;
+
+  const card = (
     <article
       className={cn(
         "@container relative flex min-w-0 rounded-md border border-border bg-card/60",
@@ -297,5 +303,13 @@ export function RichWorkProductCard({ workProduct, href, variant = "card" }: Ric
         />
       ) : null}
     </article>
+  );
+
+  if (!htmlContentPath) return card;
+  return (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <HtmlArtifactFrame contentPath={htmlContentPath} title={workProduct.title} />
+      {card}
+    </div>
   );
 }

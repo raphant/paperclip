@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn, relativeTime } from "@/lib/utils";
 import {
   formatBytes,
+  isHtmlLikeOutput,
   isImageContentType,
   isVideoLikeOutput,
   outputFilename,
@@ -11,6 +12,7 @@ import {
 } from "@/lib/issue-output";
 import { OutputVideoPlayer } from "./OutputVideoPlayer";
 import { OutputFileTile } from "./OutputFileTile";
+import { HtmlArtifactFrame } from "@/components/artifacts/HtmlArtifactFrame";
 import { Card } from "@/components/ui/card";
 
 interface OutputPrimaryCardProps {
@@ -20,7 +22,7 @@ interface OutputPrimaryCardProps {
 }
 
 /**
- * Full-width primary output card: media region (video / image / generic file)
+ * Full-width primary output card: media region (video / image / live HTML / generic file)
  * over a metadata strip with Open + Download actions. The layout stacks on
  * mobile and uses a single horizontal meta row on desktop.
  */
@@ -39,6 +41,8 @@ export function OutputPrimaryCard({ item, creatorName, onMediaClick }: OutputPri
       {/* Media region */}
       {isVideo && meta ? (
         <OutputVideoPlayer src={meta.contentPath} title={filename} />
+      ) : meta && isHtmlLikeOutput(contentType, meta.originalFilename) ? (
+        <HtmlArtifactFrame contentPath={meta.contentPath} title={filename} className="rounded-none border-0" />
       ) : meta && isImageContentType(contentType) ? (
         onMediaClick ? (
           <button
