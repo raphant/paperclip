@@ -1,11 +1,13 @@
 import { z } from "zod";
 import {
   ISSUE_PRIORITIES,
+  ISSUE_STATUSES,
   ROUTINE_ACTIVITY_GATE_POLICIES,
   ROUTINE_ACTIVITY_GATE_SCOPES,
   ROUTINE_CATCH_UP_POLICIES,
   ROUTINE_CONCURRENCY_POLICIES,
   ROUTINE_STATUSES,
+  ROUTINE_TRIGGER_EVENTS,
   ROUTINE_TRIGGER_KINDS,
   ROUTINE_TRIGGER_SIGNING_MODES,
   ROUTINE_VARIABLE_TYPES,
@@ -61,6 +63,23 @@ export const routineVariableSchema = z.object({
     }
   }
 });
+
+const routineEventStatusListSchema = z
+  .array(z.union([z.literal("any"), z.enum(ISSUE_STATUSES)]))
+  .min(1)
+  .max(ISSUE_STATUSES.length + 1);
+
+/** Filter of an `event` trigger; see `RoutineEventFilter`. */
+export const routineEventFilterSchema = z.object({
+  event: z.enum(ROUTINE_TRIGGER_EVENTS),
+  scope: z.object({
+    projectId: z.string().guid().nullable().default(null),
+  }).strict().default({ projectId: null }),
+  match: z.object({
+    from: routineEventStatusListSchema.default(["any"]),
+    to: routineEventStatusListSchema,
+  }).strict(),
+}).strict();
 
 export const createRoutineSchema = z.object({
   projectId: z.string().guid().optional().nullable(),
@@ -119,6 +138,7 @@ export const routineRevisionSnapshotTriggerV1Schema = z.object({
   publicId: z.string().nullable(),
   signingMode: z.enum(ROUTINE_TRIGGER_SIGNING_MODES).nullable(),
   replayWindowSec: z.number().int().min(30).max(86_400).nullable(),
+  eventFilter: routineEventFilterSchema.nullable().optional(),
 }).strict();
 
 export const routineRevisionSnapshotV1Schema = z.object({
@@ -151,6 +171,10 @@ export const createRoutineTriggerSchema = z.discriminatedUnion("kind", [
   baseTriggerSchema.extend({
     kind: z.literal("api"),
   }),
+  baseTriggerSchema.extend({
+    kind: z.literal("event"),
+    eventFilter: routineEventFilterSchema,
+  }),
 ]);
 
 export type CreateRoutineTrigger = z.infer<typeof createRoutineTriggerSchema>;
@@ -164,6 +188,7 @@ export const updateRoutineTriggerSchema = z.object({
   timezone: z.string().trim().min(1).optional().nullable(),
   signingMode: z.enum(ROUTINE_TRIGGER_SIGNING_MODES).optional().nullable(),
   replayWindowSec: z.number().int().min(30).max(86_400).optional().nullable(),
+  eventFilter: routineEventFilterSchema.optional(),
 });
 
 export type UpdateRoutineTrigger = z.infer<typeof updateRoutineTriggerSchema>;

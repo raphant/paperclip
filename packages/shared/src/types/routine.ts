@@ -6,6 +6,7 @@ import type {
   RoutineCatchUpPolicy,
   RoutineConcurrencyPolicy,
   RoutineStatus,
+  RoutineTriggerEvent,
   RoutineTriggerKind,
   RoutineTriggerSigningMode,
   RoutineVariableType,
@@ -137,6 +138,17 @@ export interface RoutineRevisionSnapshotRoutineV1 {
   responsibleUserId: string | null;
 }
 
+/**
+ * Filter of an `event` trigger, stored in `routine_triggers.event_filter`.
+ * `scope.projectId` null means the whole company. `from` / `to` list issue
+ * statuses, or `["any"]`. An unknown `from` matches only `["any"]`.
+ */
+export interface RoutineEventFilter {
+  event: RoutineTriggerEvent;
+  scope: { projectId: string | null };
+  match: { from: string[]; to: string[] };
+}
+
 export interface RoutineRevisionSnapshotTriggerV1 {
   setupPending?: boolean;
   id: string;
@@ -148,6 +160,7 @@ export interface RoutineRevisionSnapshotTriggerV1 {
   publicId: string | null;
   signingMode: RoutineTriggerSigningMode | null;
   replayWindowSec: number | null;
+  eventFilter?: RoutineEventFilter | null;
 }
 
 export interface RoutineRevisionSnapshotV1 {
@@ -199,6 +212,7 @@ export interface RoutineTrigger {
   secretId: string | null;
   signingMode: string | null;
   replayWindowSec: number | null;
+  eventFilter?: RoutineEventFilter | null;
   lastRotatedAt: Date | null;
   lastResult: string | null;
   createdByAgentId: string | null;

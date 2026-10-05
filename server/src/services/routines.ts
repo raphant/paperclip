@@ -35,6 +35,7 @@ import type {
   Routine,
   RoutineDetail,
   RoutineDescriptionDocument,
+  RoutineEventFilter,
   RoutineListItem,
   RoutineManagedByPlugin,
   RoutineRevision,
@@ -80,6 +81,7 @@ import {
 import { queueIssueAssignmentWakeup, type IssueAssignmentWakeupDeps } from "./issue-assignment-wakeup.js";
 import { logActivity } from "./activity-log.js";
 import type { PluginWorkerManager } from "./plugin-worker-manager.js";
+import type { LiveEvent } from "@paperclipai/shared";
 import { runtimePublicOrigin } from "./cloud-runtime-identity.js";
 
 const OPEN_ISSUE_STATUSES = ["backlog", "todo", "in_progress", "in_review", "blocked"];
@@ -430,14 +432,16 @@ function assertRoutineCanEnable(status: string, assigneeAgentId: string | null |
   }
 }
 
+type RoutineDispatchSource = "schedule" | "manual" | "api" | "webhook" | "event";
+
 function collectProvidedRoutineVariables(
-  source: "schedule" | "manual" | "api" | "webhook",
+  source: RoutineDispatchSource,
   payload: Record<string, unknown> | null | undefined,
   variables: Record<string, unknown> | null | undefined,
 ) {
   const nestedVariables = isPlainRecord(payload) && isPlainRecord(payload.variables) ? payload.variables : {};
   const provided = {
-    ...(source === "webhook" && payload ? payload : {}),
+    ...((source === "webhook" || source === "event") && payload ? payload : {}),
     ...nestedVariables,
     ...(variables ?? {}),
   };
@@ -448,7 +452,7 @@ function collectProvidedRoutineVariables(
 function resolveRoutineVariableValues(
   variables: RoutineVariable[],
   input: {
-    source: "schedule" | "manual" | "api" | "webhook";
+    source: RoutineDispatchSource;
     payload?: Record<string, unknown> | null;
     variables?: Record<string, unknown> | null;
     automaticVariables?: Record<string, string | number | boolean>;
@@ -533,6 +537,77 @@ function createRoutineDispatchFingerprint(input: {
   return crypto.createHash("sha256").update(canonical).digest("hex");
 }
 
+/** Facts of one issue status change, as an `event` trigger sees them. */
+export type RoutineIssueStatusChangeFacts = {
+  eventName: "issue.status_changed";
+  issueId: string;
+  issueIdentifier: string | null;
+  issueTitle: string | null;
+  projectId: string | null;
+  fromStatus: string | null;
+  toStatus: string;
+  actorType: string;
+  actorId: string;
+  actorName: string | null;
+  agentId: string | null;
+  occurredAt: string;
+};
+
+/**
+ * Reads an `activity.logged` live event. Returns the status change it carries,
+ * or null. Only `issue.updated` rows count; from is `details._previous.status`
+ * (null when the row has no `_previous`). Issue title and project are filled
+ * in later from the issue row.
+ */
+export function readIssueStatusChange(event: Pick<LiveEvent, "type" | "payload" | "createdAt">) {
+  if (event.type !== "activity.logged") return null;
+  const payload = event.payload;
+  if (payload.action !== "issue.updated" || payload.entityType !== "issue") return null;
+  if (typeof payload.entityId !== "string") return null;
+  const details = isPlainRecord(payload.details) ? payload.details : null;
+  const toStatus = typeof details?.status === "string" ? details.status : null;
+  if (!details || !toStatus) return null;
+  // The main PATCH route lists what really changed; a status field that did not change is no event.
+  if (isPlainRecord(details.changes) && !("status" in details.changes)) return null;
+  const previous = isPlainRecord(details._previous) ? details._previous : null;
+  const fromStatus = typeof previous?.status === "string" ? previous.status : null;
+  if (fromStatus === toStatus) return null;
+  return {
+    eventName: "issue.status_changed",
+    issueId: payload.entityId,
+    issueIdentifier: typeof details.identifier === "string" ? details.identifier : null,
+    issueTitle: null,
+    projectId: null,
+    fromStatus,
+    toStatus,
+    actorType: String(payload.actorType ?? "system"),
+    actorId: String(payload.actorId ?? ""),
+    actorName: null,
+    agentId: typeof payload.agentId === "string" ? payload.agentId : null,
+    occurredAt: event.createdAt,
+  } satisfies RoutineIssueStatusChangeFacts;
+}
+
+/** Pure match of an `event` trigger's filter. An unknown from matches only `["any"]`. */
+export function matchesEventFilter(filter: RoutineEventFilter, facts: RoutineIssueStatusChangeFacts) {
+  if (filter.event !== facts.eventName) return false;
+  if (filter.scope.projectId && filter.scope.projectId !== facts.projectId) return false;
+  const fromOk = filter.match.from.includes("any")
+    || (facts.fromStatus !== null && filter.match.from.includes(facts.fromStatus));
+  const toOk = filter.match.to.includes("any") || filter.match.to.includes(facts.toStatus);
+  return fromOk && toOk;
+}
+
+function describeRoutineEvent(facts: RoutineIssueStatusChangeFacts) {
+  const issue = facts.issueIdentifier ?? facts.issueId;
+  const actor = facts.actorName ?? `${facts.actorType} ${facts.actorId}`.trim();
+  return `${issue} ${facts.fromStatus ?? "(unknown)"} → ${facts.toStatus} by ${actor}`;
+}
+
+function automaticRoutineActorId(source: "schedule" | "webhook" | "event") {
+  return source === "schedule" ? "routine-scheduler" : source === "webhook" ? "routine-webhook" : "routine-event";
+}
+
 function createRoutineEnvFingerprint(env: unknown) {
   const canonical = JSON.stringify(normalizeRoutineDispatchFingerprintValue(env ?? null));
   return crypto.createHash("sha256").update(canonical).digest("hex");
@@ -587,6 +662,8 @@ function routineRevisionSnapshotTrigger(trigger: RoutineTriggerRow): RoutineRevi
     publicId: trigger.publicId,
     signingMode: trigger.signingMode as RoutineRevisionSnapshotV1["triggers"][number]["signingMode"],
     replayWindowSec: trigger.replayWindowSec,
+    // Only event triggers carry the key, so older snapshots still match unchanged triggers.
+    ...(trigger.kind === "event" ? { eventFilter: trigger.eventFilter ?? null } : {}),
   };
 }
 
@@ -1399,7 +1476,7 @@ export function routineService(
   async function recordSuppressedAutomaticRun(input: {
     routine: typeof routines.$inferSelect;
     trigger: typeof routineTriggers.$inferSelect;
-    source: "schedule" | "webhook";
+    source: "schedule" | "webhook" | "event";
     reason: string;
     nextRunAt?: Date | null;
     details?: Record<string, unknown> | null;
@@ -1413,7 +1490,7 @@ export function routineService(
         sql`select id from ${routines} where ${routines.id} = ${input.routine.id} and ${routines.companyId} = ${input.routine.companyId} for update`,
       );
 
-      if (input.trigger && (input.source === "webhook" || input.source === "schedule")) {
+      if (input.trigger && (input.source === "webhook" || input.source === "schedule" || input.source === "event")) {
         const currentTrigger = await txDb.select().from(routineTriggers).where(eq(routineTriggers.id, input.trigger.id)).then((rows) => rows[0]);
         const currentRoutine = await txDb.select({ status: routines.status }).from(routines).where(eq(routines.id, input.routine.id)).then((rows) => rows[0]);
         if (!currentTrigger || currentTrigger.archived || !currentTrigger.enabled || currentTrigger.setupPending || currentRoutine?.status !== "active") {
@@ -1481,7 +1558,7 @@ export function routineService(
       await logActivity(db, {
         companyId: input.routine.companyId,
         actorType: "system",
-        actorId: input.source === "schedule" ? "routine-scheduler" : "routine-webhook",
+        actorId: automaticRoutineActorId(input.source),
         action: "routine.run_skipped",
         entityType: "routine_run",
         entityId: run.id,
@@ -1712,7 +1789,7 @@ export function routineService(
   async function dispatchRoutineRun(input: {
     routine: typeof routines.$inferSelect;
     trigger: typeof routineTriggers.$inferSelect | null;
-    source: "schedule" | "manual" | "api" | "webhook";
+    source: RoutineDispatchSource;
     payload?: Record<string, unknown> | null;
     variables?: Record<string, unknown> | null;
     projectId?: string | null;
@@ -1772,8 +1849,11 @@ export function routineService(
       : "routine_execution";
     const issueOriginId = managedIssueTemplate?.originId ?? input.routine.id;
     const issueBillingCode = managedIssueTemplate?.billingCode ?? null;
+    // Event facts stay out of the fingerprint, so a burst coalesces into one open run issue.
+    // always_enqueue keeps them in: one issue per event needs distinct fingerprints.
+    const fingerprintWithoutEvent = input.source === "event" && input.routine.concurrencyPolicy !== "always_enqueue";
     const dispatchFingerprint = createRoutineDispatchFingerprint({
-      payload: triggerPayload,
+      payload: fingerprintWithoutEvent ? null : triggerPayload,
       projectId,
       projectWorkspaceId,
       assigneeAgentId,
@@ -1782,8 +1862,8 @@ export function routineService(
       executionWorkspaceId: input.executionWorkspaceId ?? null,
       executionWorkspacePreference: input.executionWorkspacePreference ?? null,
       executionWorkspaceSettings: input.executionWorkspaceSettings ?? null,
-      title,
-      description,
+      title: fingerprintWithoutEvent ? input.routine.title : title,
+      description: fingerprintWithoutEvent ? input.routine.description : description,
     });
     let reusedExistingRun = false;
     const run = await db.transaction(async (tx) => {
@@ -1792,7 +1872,7 @@ export function routineService(
         sql`select id from ${routines} where ${routines.id} = ${input.routine.id} and ${routines.companyId} = ${input.routine.companyId} for update`,
       );
 
-      if (input.trigger && (input.source === "webhook" || input.source === "schedule")) {
+      if (input.trigger && (input.source === "webhook" || input.source === "schedule" || input.source === "event")) {
         const currentTrigger = await txDb.select().from(routineTriggers).where(eq(routineTriggers.id, input.trigger.id)).then((rows) => rows[0]);
         const currentRoutine = await txDb.select({ status: routines.status }).from(routines).where(eq(routines.id, input.routine.id)).then((rows) => rows[0]);
         if (!currentTrigger || currentTrigger.archived || !currentTrigger.enabled || currentTrigger.setupPending || currentRoutine?.status !== "active") {
@@ -1977,7 +2057,7 @@ export function routineService(
           reason: "issue_assigned",
           mutation: "create",
           contextSource: "routine.dispatch",
-          requestedByActorType: input.source === "schedule" ? "system" : undefined,
+          requestedByActorType: input.source === "schedule" || input.source === "event" ? "system" : undefined,
           rethrowOnError: true,
         });
         const updated = await finalizeRun(createdRun.id, {
@@ -2014,8 +2094,8 @@ export function routineService(
       }
     });
 
-    if (!reusedExistingRun && (input.source === "schedule" || input.source === "webhook")) {
-      const actorId = input.source === "schedule" ? "routine-scheduler" : "routine-webhook";
+    if (!reusedExistingRun && (input.source === "schedule" || input.source === "webhook" || input.source === "event")) {
+      const actorId = automaticRoutineActorId(input.source);
       try {
         await logActivity(db, {
           companyId: input.routine.companyId,
@@ -2045,6 +2125,149 @@ export function routineService(
     }
 
     return run;
+  }
+
+  let eventTriggerQueue: Promise<unknown> = Promise.resolve();
+
+  async function listActiveEventTriggers(companyId: string, triggerId?: string) {
+    return db
+      .select({ trigger: routineTriggers, routine: routines, projectPausedAt: projects.pausedAt })
+      .from(routineTriggers)
+      .innerJoin(routines, eq(routineTriggers.routineId, routines.id))
+      .leftJoin(projects, eq(routines.projectId, projects.id))
+      .where(
+        and(
+          eq(routineTriggers.companyId, companyId),
+          eq(routineTriggers.kind, "event"),
+          eq(routineTriggers.enabled, true),
+          eq(routineTriggers.archived, false),
+          eq(routineTriggers.setupPending, false),
+          eq(routines.status, "active"),
+          ...(triggerId ? [eq(routineTriggers.id, triggerId)] : []),
+        ),
+      )
+      .orderBy(asc(routineTriggers.createdAt));
+  }
+
+  /** Runs one event dispatch, or records it as skipped when the project is paused or the worktree cut-off applies. */
+  async function dispatchEventRun(
+    row: Awaited<ReturnType<typeof listActiveEventTriggers>>[number],
+    payload: Record<string, unknown>,
+    descriptionAppendix: string,
+    idempotencyKey?: string,
+  ) {
+    const projectPaused = !!(row.routine.projectId && row.projectPausedAt);
+    const worktreeSuppressed = !(await getAutomaticRoutineDispatchEligibility(row.routine)).eligible;
+    if (projectPaused || worktreeSuppressed) {
+      await recordSuppressedAutomaticRun({
+        routine: row.routine,
+        trigger: row.trigger,
+        source: "event",
+        reason: worktreeSuppressed ? "worktree_execution_cutoff" : "paused",
+        details: payload,
+      });
+      return null;
+    }
+    return dispatchRoutineRun({
+      routine: row.routine,
+      trigger: row.trigger,
+      source: "event",
+      payload,
+      descriptionAppendix,
+      idempotencyKey: idempotencyKey ?? null,
+    });
+  }
+
+  /**
+   * Trailing pass: when an event routine's run issue closes, the events that were
+   * coalesced into it while it was open get exactly one more run. That run's issue
+   * gets the same pass when it closes, until one closes with nothing new.
+   */
+  async function dispatchTrailingEventRun(issue: { id: string; companyId: string; identifier: string | null; originId: string }) {
+    const coalesced = await db
+      .select({ triggerId: routineRuns.triggerId, triggerPayload: routineRuns.triggerPayload })
+      .from(routineRuns)
+      .where(
+        and(
+          eq(routineRuns.companyId, issue.companyId),
+          eq(routineRuns.routineId, issue.originId),
+          eq(routineRuns.linkedIssueId, issue.id),
+          eq(routineRuns.source, "event"),
+          eq(routineRuns.status, "coalesced"),
+        ),
+      )
+      .orderBy(asc(routineRuns.triggeredAt), asc(routineRuns.createdAt));
+    const last = coalesced.at(-1);
+    if (!last?.triggerId) return null;
+    const [row] = await listActiveEventTriggers(issue.companyId, last.triggerId);
+    if (!row) return null;
+    const events = coalesced
+      .map((run) => run.triggerPayload as RoutineIssueStatusChangeFacts | null)
+      .filter((facts): facts is RoutineIssueStatusChangeFacts => !!facts && facts.eventName === "issue.status_changed");
+    const lastFacts = events.at(-1);
+    if (!lastFacts) return null;
+    const lines = events.map((facts) => `- ${describeRoutineEvent(facts)}`).join("\n");
+    return dispatchEventRun(
+      row,
+      { ...lastFacts, coalescedEventCount: events.length, trailingForIssueId: issue.id },
+      `Started by ${events.length} event${events.length === 1 ? "" : "s"} that came in while ${issue.identifier ?? issue.id} was open:\n${lines}`,
+      // One trailing pass per closed issue, even if it is reopened and closed again.
+      `trailing:${issue.id}`,
+    );
+  }
+
+  async function handleIssueStatusChange(companyId: string, change: RoutineIssueStatusChangeFacts) {
+    const issue = await db
+      .select({
+        id: issues.id,
+        companyId: issues.companyId,
+        projectId: issues.projectId,
+        identifier: issues.identifier,
+        title: issues.title,
+        originKind: issues.originKind,
+        originId: issues.originId,
+      })
+      .from(issues)
+      .where(and(eq(issues.companyId, companyId), eq(issues.id, change.issueId)))
+      .then((rows) => rows[0] ?? null);
+    if (!issue) return { dispatched: 0, trailing: 0 };
+
+    let trailing = 0;
+    if (issue.originKind === "routine_execution" && issue.originId && TERMINAL_ISSUE_STATUSES.has(change.toStatus)) {
+      const run = await dispatchTrailingEventRun({ ...issue, originId: issue.originId });
+      if (run) trailing = 1;
+    }
+
+    const rows = await listActiveEventTriggers(companyId);
+    if (rows.length === 0) return { dispatched: 0, trailing };
+    const actorName = change.actorType === "agent" && change.actorId
+      ? await db
+          .select({ name: agents.name })
+          .from(agents)
+          .where(and(eq(agents.companyId, companyId), eq(agents.id, change.actorId)))
+          .then((found) => found[0]?.name ?? null)
+      : null;
+    const facts: RoutineIssueStatusChangeFacts = {
+      ...change,
+      issueIdentifier: issue.identifier ?? change.issueIdentifier,
+      issueTitle: issue.title,
+      projectId: issue.projectId,
+      actorName,
+    };
+
+    let dispatched = 0;
+    for (const row of rows) {
+      if (!row.trigger.eventFilter || !matchesEventFilter(row.trigger.eventFilter, facts)) continue;
+      // Self-guard: a routine never starts on its own run issues.
+      if (issue.originKind === "routine_execution" && issue.originId === row.routine.id) continue;
+      try {
+        const run = await dispatchEventRun(row, facts, `Started by event: ${describeRoutineEvent(facts)}`);
+        if (run) dispatched += 1;
+      } catch (err) {
+        logger.warn({ err, routineId: row.routine.id, triggerId: row.trigger.id, issueId: issue.id }, "event routine dispatch failed");
+      }
+    }
+    return { dispatched, trailing };
   }
 
   return {
@@ -2466,6 +2689,10 @@ export function routineService(
         nextRunAt = nextCronTickInTimeZone(input.cronExpression, timeZone, new Date());
       }
 
+      if (input.kind === "event" && input.eventFilter.scope.projectId) {
+        await assertProject(routine.companyId, input.eventFilter.scope.projectId);
+      }
+
       if (input.kind === "webhook") {
         publicId = crypto.randomBytes(12).toString("hex");
         const created = await createWebhookSecret(routine.companyId, routine.id, actor);
@@ -2495,6 +2722,7 @@ export function routineService(
             secretId,
             signingMode: input.kind === "webhook" ? input.signingMode : null,
             replayWindowSec: input.kind === "webhook" ? input.replayWindowSec : null,
+            eventFilter: input.kind === "event" ? input.eventFilter : null,
             lastRotatedAt: input.kind === "webhook" ? new Date() : null,
             createdByAgentId: actor.agentId ?? null,
             createdByUserId: actor.userId ?? null,
@@ -2550,6 +2778,11 @@ export function routineService(
         }
       }
 
+      if (patch.eventFilter !== undefined) {
+        if (existing.kind !== "event") throw unprocessable("Only event triggers have an event filter");
+        if (patch.eventFilter.scope.projectId) await assertProject(existing.companyId, patch.eventFilter.scope.projectId);
+      }
+
       const result = await db.transaction(async (tx) => {
         const txDb = tx as unknown as Db;
         await tx.execute(sql`select id from ${routines} where ${routines.id} = ${existing.routineId} for update`);
@@ -2565,6 +2798,7 @@ export function routineService(
             nextRunAt,
             signingMode: patch.signingMode === undefined ? existing.signingMode : patch.signingMode,
             replayWindowSec: patch.replayWindowSec === undefined ? existing.replayWindowSec : patch.replayWindowSec,
+            eventFilter: patch.eventFilter === undefined ? existing.eventFilter : patch.eventFilter,
             updatedByAgentId: actor.agentId ?? null,
             updatedByUserId: actor.userId ?? null,
             updatedAt: new Date(),
@@ -2811,6 +3045,7 @@ export function routineService(
             secretId: triggerSnapshot.kind === "webhook" ? (current?.secretId ?? webhookSecret?.secretId ?? null) : null,
             signingMode: triggerSnapshot.kind === "webhook" ? triggerSnapshot.signingMode : null,
             replayWindowSec: triggerSnapshot.kind === "webhook" ? triggerSnapshot.replayWindowSec : null,
+            eventFilter: triggerSnapshot.kind === "event" ? triggerSnapshot.eventFilter ?? null : null,
             nextRunAt: restoredNextRunAt,
             updatedByAgentId: actor.agentId ?? null,
             updatedByUserId: actor.userId ?? null,
@@ -3291,6 +3526,25 @@ export function routineService(
       }
 
       return { triggered };
+    },
+
+    /**
+     * Listener for `activity.logged` live events; `server/src/index.ts` subscribes it
+     * with `subscribeAllCompanyLiveEvents`. Starts each active `event` trigger whose
+     * filter matches an issue status change, and runs the trailing pass when an
+     * event run issue closes. Never throws: it runs on the in-process bus.
+     */
+    handleActivityEvent: async (event: LiveEvent) => {
+      const change = readIssueStatusChange(event);
+      if (!change) return { dispatched: 0, trailing: 0 };
+      // One event at a time: a burst of parallel dispatches would each hold a pool
+      // connection while waiting on the routine row lock, and starve the wake-up.
+      const handled = eventTriggerQueue.then(() => handleIssueStatusChange(event.companyId, change)).catch((err) => {
+        logger.error({ err, issueId: change.issueId }, "event routine trigger failed");
+        return { dispatched: 0, trailing: 0 };
+      });
+      eventTriggerQueue = handled;
+      return handled;
     },
 
     syncRunStatusForIssue: async (issueId: string) => {

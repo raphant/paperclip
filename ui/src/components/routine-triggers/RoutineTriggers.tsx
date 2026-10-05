@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, Plus, Webhook } from "lucide-react";
+import { CalendarClock, Plus, Webhook, Zap } from "lucide-react";
 import type { RoutineTrigger } from "@paperclipai/shared";
 import { useSearchParams } from "@/lib/router";
 import { routinesApi } from "@/api/routines";
@@ -22,6 +22,8 @@ import { RoutineTriggerCard } from "./TriggerCard";
 import {
   RoutineTriggerWizard,
   defaultTriggerDraft,
+  describeEventFilter,
+  eventFilterFromDraft,
   webhookAgentInstructions,
   type TriggerDraft,
 } from "./TriggerWizard";
@@ -31,7 +33,7 @@ import { WebhookUrlWarning } from "./WebhookUrlWarning";
 function readDraft(key: string): TriggerDraft | null {
   try {
     const draft = JSON.parse(sessionStorage.getItem(key) ?? "null");
-    return draft && ["choose", "schedule", "webhook"].includes(draft.kind)
+    return draft && ["choose", "schedule", "webhook", "event"].includes(draft.kind)
       ? { ...defaultTriggerDraft, ...draft, sender: draft.sender === "github" ? "github" : "custom" }
       : null;
   } catch {
@@ -131,6 +133,7 @@ export function RoutineTriggers() {
           routineId={routine.id}
           companyId={routine.companyId}
           routineTitle={routine.title}
+          routineProjectId={routine.projectId ?? null}
           trigger={trigger}
           onExit={closeSetup}
           onRefresh={refresh}
@@ -166,7 +169,9 @@ export function RoutineTriggers() {
               ? "Schedule"
               : trigger.kind === "api"
                 ? "API trigger"
-                : "Webhook"}{" "}
+                : trigger.kind === "event"
+                  ? "Event trigger"
+                  : "Webhook"}{" "}
             removed.
           </span>
           <Button
@@ -204,7 +209,8 @@ export function RoutineTriggers() {
       )}
       {routine.triggers.length === 0 && (
         <p className="py-6 text-sm text-muted-foreground">
-          Run this routine on a schedule or when another app sends a webhook.
+          Run this routine on a schedule, when another app sends a webhook,
+          or when an issue changes status.
         </p>
       )}
       <fieldset disabled={busy} className="min-w-0 space-y-3">
@@ -216,11 +222,15 @@ export function RoutineTriggers() {
                 ? "schedule"
                 : trigger.kind === "api"
                   ? "api"
-                  : "webhook"
+                  : trigger.kind === "event"
+                    ? "event"
+                    : "webhook"
             }
             icon={
               trigger.kind === "schedule" ? (
                 <CalendarClock className="h-4 w-4" />
+              ) : trigger.kind === "event" ? (
+                <Zap className="h-4 w-4" />
               ) : (
                 <Webhook className="h-4 w-4" />
               )
@@ -230,7 +240,9 @@ export function RoutineTriggers() {
                 ? (describeCron(trigger.cronExpression) ?? "Schedule")
                 : trigger.kind === "api"
                   ? "API trigger"
-                  : trigger.signingMode === "github_hmac"
+                  : trigger.kind === "event"
+                    ? describeEventFilter(trigger.eventFilter)
+                    : trigger.signingMode === "github_hmac"
                     ? "GitHub webhook"
                     : "Webhook"
             }
@@ -243,7 +255,9 @@ export function RoutineTriggers() {
                     ? (trigger.timezone ?? "UTC")
                     : trigger.kind === "api"
                       ? "Run through the API"
-                      : trigger.lastWebhookDelivery?.status === "rejected"
+                      : trigger.kind === "event"
+                        ? "Ignores this routine’s own run issues"
+                        : trigger.lastWebhookDelivery?.status === "rejected"
                         ? "Authentication failed · Check the key in your app"
                         : trigger.lastWebhookDelivery?.status === "received" &&
                             !trigger.lastWebhookDelivery.test
@@ -282,6 +296,13 @@ export function RoutineTriggers() {
               <p className="text-sm text-muted-foreground">
                 This trigger starts the routine through the API.
               </p>
+            ) : trigger.kind === "event" ? (
+              <p className="text-sm text-muted-foreground">
+                Starts the routine when {describeEventFilter(trigger.eventFilter).replace(/^./, (c) => c.toLowerCase())}.
+                It ignores this routine’s own run issues. Two event routines can
+                start each other in a loop. To change the event, remove this
+                trigger and add a new one.
+              </p>
             ) : (
               <WebhookSettings
                 trigger={trigger}
@@ -315,6 +336,7 @@ function TriggerSetup({
   routineId,
   companyId,
   routineTitle,
+  routineProjectId,
   trigger,
   onExit,
   onRefresh,
@@ -322,6 +344,7 @@ function TriggerSetup({
   routineId: string;
   companyId: string;
   routineTitle: string;
+  routineProjectId: string | null;
   trigger?: RoutineTrigger;
   onExit: () => void;
   onRefresh: () => Promise<void>;
@@ -395,6 +418,11 @@ function TriggerSetup({
           cronExpression: scheduleCron(draft),
           timezone: draft.timezone,
         });
+      else if (draft.kind === "event")
+        await routinesApi.createTrigger(routineId, {
+          kind: "event",
+          eventFilter: eventFilterFromDraft(draft, routineProjectId),
+        });
       else {
         if (!createdRef.current)
           throw new Error("Create the webhook before finishing setup.");
@@ -412,7 +440,7 @@ function TriggerSetup({
       await onRefresh();
       onExit();
     },
-    [routineId, onRefresh, onExit, storagePrefix],
+    [routineId, routineProjectId, onRefresh, onExit, storagePrefix],
   );
   const { routine: currentRoutine } = useRoutineDetail();
   return (
@@ -421,6 +449,7 @@ function TriggerSetup({
       routineTitle={routineTitle}
       routineId={routineId}
       routineActive={currentRoutine.status === "active"}
+      routineProjectId={routineProjectId}
       webhookUrl={currentTrigger?.webhookUrl ?? ""}
       webhookSecret={secret}
       onCreateWebhook={createWebhook}
