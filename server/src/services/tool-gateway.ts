@@ -163,7 +163,7 @@ import { extendApprovedExecutionWaitDeadline } from "./approved-execution-wait.j
 
 const DEFAULT_SESSION_TTL_MS = 15 * 60 * 1000;
 const MAX_SESSION_TTL_MS = 60 * 60 * 1000;
-const DEFAULT_TOOL_TIMEOUT_MS = 10_000;
+const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
 
 export function resolveCredentialGrantKind(
   policy: "shared" | "per_user" | "per_user_with_fallback" | "per_agent",
@@ -190,9 +190,10 @@ export function isConnectionGrantAudienceAllowed(
 // When a human approves a parked write, the server carries it out on their
 // behalf with no interactive caller left to raise `timeoutMs`. Remote write
 // providers (e.g. Zapier Google Sheets `add_row`) routinely take longer than
-// the 10s interactive default, so an approved action would otherwise abort with
+// a short interactive default, so an approved action would otherwise abort with
 // `tool_timeout` even though the approval succeeded. Give approved executions
-// the full permitted headroom instead.
+// the full permitted headroom instead. The interactive default is also 60s:
+// the context-catalog review tools answer slower than 10s.
 const APPROVED_EXECUTION_TIMEOUT_MS = 60_000;
 const ACTION_REQUEST_EXECUTION_POLL_MS = 25;
 // Approval execution performs live target, signature, managed-argument, and
