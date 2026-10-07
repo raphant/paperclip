@@ -232,6 +232,13 @@ export interface AdapterExecutionContext {
    */
   onDispatch?: () => void;
   onSpawn?: (meta: { pid: number; processGroupId: number | null; startedAt: string }) => Promise<void>;
+  /**
+   * Adapters that can take a user message while the run is live call this with
+   * a function that delivers one, and with `null` once they no longer can. The
+   * function resolves when the message is handed to the provider. The server
+   * uses it to steer queued chat messages into a legacy run.
+   */
+  onSteerable?: (steer: ((message: string) => Promise<void>) | null) => void;
   authToken?: string;
   /**
    * The injected OpenTelemetry startup trace context (tracer + root

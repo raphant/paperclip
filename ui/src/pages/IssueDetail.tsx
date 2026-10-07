@@ -1492,7 +1492,8 @@ const IssueDetailChatTab = memo(function IssueDetailChatTab({
   // Do not briefly select queue behavior from the current assignee while the
   // authoritative active-run lookup is still loading. The active runtime owns
   // the protocol: native Paperclip turns can steer in place, while legacy
-  // adapters expose the same composer queue with an interrupt fallback.
+  // adapters expose the same composer queue with an interrupt fallback, plus
+  // Steer while the run's adapter takes messages (the Claude CLI engine).
   const runtimeSelectionKnown =
     liveRunsFetched && (!activeRunQueryEnabled || activeRunFetched);
   const queuedCommentQueueEnabled =

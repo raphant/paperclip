@@ -109,7 +109,8 @@ describe("TaskChatQueuedMessages", () => {
       source: { kind: "interaction" as const, interactionId: "confirmation-1", interactionKind: "request_confirmation",
         requiresFreshSession: runtime === "native-plan" } };
     const props = render({ queue: { ...queue, entries: [entry],
-      protocol: runtime === "legacy" ? "legacy" : "paperclip_runner_v1" },
+      protocol: runtime === "legacy" ? "legacy" : "paperclip_runner_v1",
+      steeringDisposition: runtime === "legacy" ? "unsupported" : "available" },
       onInterrupt: vi.fn().mockResolvedValue(undefined) });
     expect(props.onSteer).not.toHaveBeenCalled();
     expect(props.onInterrupt).not.toHaveBeenCalled();
@@ -348,5 +349,23 @@ describe("TaskChatQueuedMessages", () => {
     expect(container.textContent).toContain(
       "Queued messages will be sent when the previous run has stopped.",
     );
+  });
+
+  it("steers a legacy queued message while the run's adapter takes messages", async () => {
+    const props = render({
+      queue: { ...queue, protocol: "legacy", steeringDisposition: "available" },
+      onInterrupt: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(
+      container.querySelector('[data-testid="task-chat-queued-interrupt-comment-1"]'),
+    ).toBeNull();
+    await act(async () => {
+      container
+        .querySelector<HTMLButtonElement>('[data-testid="task-chat-queued-steer-comment-1"]')
+        ?.click();
+    });
+
+    expect(props.onSteer).toHaveBeenCalledWith("comment-1", "rev-1");
   });
 });

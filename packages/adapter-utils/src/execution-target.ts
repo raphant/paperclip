@@ -274,6 +274,8 @@ export interface AdapterExecutionTargetProcessOptions {
   cwd: string;
   env: Record<string, string>;
   stdin?: string;
+  /** Local and SSH targets only: see `runChildProcess`. Sandbox targets ignore it. */
+  keepStdinOpen?: (stdin: NodeJS.WritableStream) => void;
   timeoutSec: number;
   graceSec: number;
   onLog: (stream: "stdout" | "stderr", chunk: string) => Promise<void>;
@@ -915,6 +917,7 @@ export async function runAdapterExecutionTargetProcess(
     cwd: options.cwd,
     env,
     stdin: options.stdin,
+    keepStdinOpen: options.keepStdinOpen,
     timeoutSec: options.timeoutSec,
     graceSec: options.graceSec,
     onLog: options.onLog,

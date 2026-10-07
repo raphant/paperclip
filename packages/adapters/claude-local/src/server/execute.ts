@@ -59,6 +59,7 @@ import {
   parseLocalProcessNetworkScope,
   type LocalProcessSandboxOptions,
 } from "@paperclipai/adapter-utils/local-process-sandbox";
+import { CLAUDE_STEERING_ARGS, createClaudeCliSteering } from "./steering.js";
 import {
   claudeModelUsageTotals,
   parseClaudeStreamJson,
@@ -930,7 +931,15 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
 
   const runAttempt = async (resumeSessionId: string | null) => {
     const attemptInstructionsFilePath = resumeSessionId ? undefined : effectiveInstructionsFilePath;
-    const args = buildClaudeArgs(resumeSessionId, attemptInstructionsFilePath);
+    // Only a local process gives the server a stdin to write steered messages to.
+    const steering =
+      ctx.onSteerable && !executionTargetIsRemote
+        ? createClaudeCliSteering({ prompt, onLog, onSteerable: ctx.onSteerable })
+        : null;
+    const args = [
+      ...buildClaudeArgs(resumeSessionId, attemptInstructionsFilePath),
+      ...(steering ? CLAUDE_STEERING_ARGS : []),
+    ];
     const commandNotes: string[] = [];
     if (!resumeSessionId) {
       commandNotes.push(`Using stable Claude prompt bundle ${promptBundle.bundleKey}.`);
@@ -964,23 +973,32 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       });
     }
 
-    const proc = await runAdapterExecutionTargetProcess(runId, runtimeExecutionTarget, command, args, {
-      cwd,
-      env,
-      stdin: prompt,
-      timeoutSec,
-      graceSec,
-      onSpawn,
-      onRuntimeProgress: ctx.onRuntimeProgress,
-      onLog,
-      runLogTail: paperclipBridge?.runLogTail,
-      settleRunDisposition: paperclipBridge?.settleRunDisposition,
-      terminalResultCleanup: {
-        graceMs: terminalResultCleanupGraceMs,
-        hasTerminalResult: ({ stdout }) => parseClaudeStreamJson(stdout).resultJson !== null,
-      },
-      localProcessSandbox,
-    });
+    let proc: RunProcessResult;
+    try {
+      proc = await runAdapterExecutionTargetProcess(runId, runtimeExecutionTarget, command, args, {
+        cwd,
+        env,
+        stdin: steering?.stdin ?? prompt,
+        keepStdinOpen: steering?.keepStdinOpen,
+        timeoutSec,
+        graceSec,
+        onSpawn,
+        onRuntimeProgress: ctx.onRuntimeProgress,
+        onLog: steering?.onLog ?? onLog,
+        runLogTail: paperclipBridge?.runLogTail,
+        settleRunDisposition: paperclipBridge?.settleRunDisposition,
+        terminalResultCleanup: {
+          graceMs: terminalResultCleanupGraceMs,
+          hasTerminalResult: steering
+            ? steering.finished
+            : ({ stdout }) => parseClaudeStreamJson(stdout).resultJson !== null,
+        },
+        localProcessSandbox,
+      });
+    } finally {
+      steering?.close();
+    }
+    await steering?.flush();
 
     const parsedStream = parseClaudeStreamJson(proc.stdout);
     const parsed = parsedStream.resultJson ?? parseJson(proc.stdout);

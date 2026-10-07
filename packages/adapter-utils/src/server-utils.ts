@@ -4605,6 +4605,12 @@ export async function runChildProcess(
     }) => Promise<void>;
     terminalResultCleanup?: TerminalResultCleanupOptions;
     stdin?: string;
+    /**
+     * Keeps stdin open after `stdin` is written and hands the pipe to the
+     * caller, which must end it. Used by adapters that write more input
+     * while the process runs (steering).
+     */
+    keepStdinOpen?: (stdin: NodeJS.WritableStream) => void;
     remoteExecution?: RemoteExecutionSpec | null;
     localProcessSandbox?: LocalProcessSandboxOptions | null;
   },
@@ -4810,7 +4816,15 @@ export async function runChildProcess(
           void spawnPersistPromise.finally(() => {
             if (child.killed || stdin.destroyed) return;
             stdin.write(opts.stdin as string);
-            stdin.end();
+            if (!opts.keepStdinOpen) {
+              stdin.end();
+              return;
+            }
+            // A write after the process exits fails with EPIPE. The caller's
+            // write callback sees it; an unhandled stream error would crash
+            // the server.
+            stdin.on("error", () => {});
+            opts.keepStdinOpen(stdin);
           });
         }
 

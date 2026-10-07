@@ -339,6 +339,7 @@ import {
   NativeSessionSteeringError,
   steerNativeSession,
 } from "../services/native-runtime/native-session-executor.js";
+import { legacyRunCanSteer, steerLegacyRun } from "../services/legacy-run-steering.js";
 import {
   buildQueuedCommentQueueSnapshot,
   decideQueuedCommentQueueSteering,
@@ -7043,6 +7044,7 @@ export function issueRoutes(
       state: queueState?.state ?? null,
       queueRunRuntimeMode: queueState?.state === "queued" ? queueState.queueRun?.runtimeMode ?? null : null,
       activeRun: input.activeRun,
+      activeRunCanSteer: input.activeRun ? legacyRunCanSteer(input.activeRun.id) : false,
       assignedAgentAdapterType: assignedAgent?.adapterType ?? null,
       queuedCommentCount: comments.length,
     });
@@ -15684,7 +15686,10 @@ export function issueRoutes(
             queueId: req.body.queueId,
             revision: req.body.revision,
           });
-          if (locked.queue.protocol !== "paperclip_runner_v1") {
+          // A legacy run steers only while its adapter takes messages
+          // (`legacy-run-steering.ts`); a native run is probed on delivery.
+          const legacy = locked.queue.protocol === "legacy";
+          if (legacy && locked.queue.steeringDisposition !== "available") {
             throw conflict("This runner does not support same-turn steering", {
               code: "steering_unsupported",
             });
@@ -15704,18 +15709,20 @@ export function issueRoutes(
             });
           }
           steeringDeliveryAttempted = true;
+          const delivery = {
+            runId: locked.activeRun.id,
+            message: entry.comment.body,
+            onAcknowledged: steeringIdentity
+              ? () => reconcileSteeredIdentity(db, steeringIdentity)
+              : undefined,
+          };
           const acknowledgement =
             (await storedSteeringAcknowledgement(tx, steeringIdentity ?? {
               companyId: issue.companyId, runId: locked.activeRun.id, messageId: commentId,
             })) ??
-            (await steerNativeSession({
-              runId: locked.activeRun.id,
-              message: entry.comment.body,
-              correlationId: commentId,
-              onAcknowledged: steeringIdentity
-                ? () => reconcileSteeredIdentity(db, steeringIdentity)
-                : undefined,
-            }));
+            (legacy
+              ? await steerLegacyRun(delivery)
+              : await steerNativeSession({ ...delivery, correlationId: commentId }));
           if (steeringIdentity)
             await acceptSteeredIdentity(tx, steeringIdentity);
           acknowledgedTurnId = acknowledgement.turnId;

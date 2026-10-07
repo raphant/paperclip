@@ -26,6 +26,7 @@ import { errorHandler } from "../middleware/index.js";
 import { issueRoutes } from "../routes/issues.js";
 import { heartbeatService } from "../services/heartbeat.js";
 import { initializeRunIdentity, reconcileSteeredIdentity } from "../services/run-identity.js";
+import { setLegacyRunSteering } from "../services/legacy-run-steering.js";
 import {
   getEmbeddedPostgresTestSupport,
   startEmbeddedPostgresTestDatabase,
@@ -1464,6 +1465,72 @@ describeEmbeddedPostgres("issue queued-comment routes", () => {
       turnId: "turn-1",
       duplicate: false,
     });
+  });
+
+  async function seedLegacyClaudeRun(seeded: Awaited<ReturnType<typeof seedQueue>>) {
+    await db.update(agents).set({ adapterType: "claude_local" }).where(eq(agents.id, seeded.agentId));
+    await db.update(heartbeatRuns).set({ runtimeMode: "legacy" }).where(eq(heartbeatRuns.id, seeded.runId));
+  }
+
+  it("steers a legacy run through its adapter while the adapter takes messages", async () => {
+    const seeded = await seedQueue();
+    await seedLegacyClaudeRun(seeded);
+    await seedDispatchIdentity(seeded);
+    const client = app(seeded.companyId);
+
+    const before = await request(client).get(`/api/issues/${seeded.issueId}/queued-comments`);
+    expect(before.body).toMatchObject({ protocol: "legacy", steeringDisposition: "unsupported" });
+
+    const steer = vi.fn(async (_message: string) => {});
+    const nativeCalls = steerNativeSessionMock.mock.calls.length;
+    setLegacyRunSteering(seeded.runId, steer);
+    try {
+      const initial = await request(client).get(`/api/issues/${seeded.issueId}/queued-comments`);
+      expect(initial.body).toMatchObject({ protocol: "legacy", steeringDisposition: "available" });
+      const steered = await request(client)
+        .post(`/api/issues/${seeded.issueId}/queued-comments/${seeded.commentIds[0]}/steer`)
+        .send({ queueId: seeded.wakeId, targetRunId: seeded.runId, revision: initial.body.revision });
+
+      expect(steered.status, JSON.stringify(steered.body)).toBe(200);
+      expect(steer).toHaveBeenCalledWith("First queued message");
+      expect(steerNativeSessionMock.mock.calls.length).toBe(nativeCalls);
+    } finally {
+      setLegacyRunSteering(seeded.runId, null);
+    }
+
+    const identity = await db
+      .select({ status: runIdentityContexts.status })
+      .from(runIdentityContexts)
+      .where(eq(runIdentityContexts.messageId, seeded.commentIds[0]))
+      .then((rows) => rows[0]);
+    expect(identity?.status).toBe("accepted");
+    const run = await db
+      .select({ resultJson: heartbeatRuns.resultJson })
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.id, seeded.runId))
+      .then((rows) => rows[0]);
+    expect((run?.resultJson as any)?.queuedSteeringAcknowledgements?.[seeded.commentIds[0]]).toMatchObject({
+      status: "acknowledged",
+      turnId: seeded.runId,
+    });
+    const after = await request(client).get(`/api/issues/${seeded.issueId}/queued-comments`);
+    expect(after.body.entries.map((entry: any) => entry.comment.id)).toEqual([seeded.commentIds[1]]);
+  });
+
+  it("keeps a legacy message queued when the run's adapter does not take messages", async () => {
+    const seeded = await seedQueue();
+    await seedLegacyClaudeRun(seeded);
+    const client = app(seeded.companyId);
+    const initial = await request(client).get(`/api/issues/${seeded.issueId}/queued-comments`);
+
+    const steered = await request(client)
+      .post(`/api/issues/${seeded.issueId}/queued-comments/${seeded.commentIds[0]}/steer`)
+      .send({ queueId: seeded.wakeId, targetRunId: seeded.runId, revision: initial.body.revision });
+
+    expect(steered.status).toBe(409);
+    expect(steered.body.details).toMatchObject({ code: "steering_unsupported" });
+    const after = await request(client).get(`/api/issues/${seeded.issueId}/queued-comments`);
+    expect(after.body.entries.map((entry: any) => entry.comment.id)).toEqual(seeded.commentIds);
   });
 
   it("keeps the identity pending after a steering timeout, then reconciles it on a later acknowledgement", async () => {

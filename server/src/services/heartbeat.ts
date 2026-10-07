@@ -616,6 +616,7 @@ import {
   type EffectiveRunConfigSecretManifestEntry,
 } from "./effective-run-config-fingerprints.js";
 import type { PluginWorkerManager } from "./plugin-worker-manager.js";
+import { setLegacyRunSteering } from "./legacy-run-steering.js";
 import { serverVersion } from "../version.js";
 
 const MAX_LIVE_LOG_CHUNK_BYTES = 8 * 1024;
@@ -24415,12 +24416,15 @@ export function heartbeatService(
                         startedAt: meta.startedAt,
                       });
                     },
+                    onSteerable: (steer) => setLegacyRunSteering(run.id, steer),
                     authToken: authToken ?? undefined,
                   });
                 },
               );
             if (!guardedDispatch.dispatched) return;
-            adapterResult = await guardedDispatch.resultPromise;
+            adapterResult = await guardedDispatch.resultPromise.finally(() =>
+              setLegacyRunSteering(run.id, null),
+            );
           }
           adapterResult = applyWorkspaceRestoreFailure(adapterResult);
           // A returned result can include a failed restore. Keep the workspace

@@ -10,6 +10,7 @@ import {
   withQueuedCommentIdsInWakePayload,
 } from "../../../services/issue-queued-comment-queue.js";
 import { logActivity as persistActivityLogRow, type ActivityPublication } from "../../../services/activity-log.js";
+import { legacyRunCanSteer } from "../../../services/legacy-run-steering.js";
 import { decideQueuedCommentWakeLookup } from "../domain/policy.js";
 import { parseObject, readNonEmptyString } from "../domain/values.js";
 import { QueuedCommentMutationError } from "../application/queued-comment-use-cases.js";
@@ -150,6 +151,7 @@ function buildTransaction(tx: Db, companyId: string, deps: QueuedCommentQueuePos
         state,
         queueRunRuntimeMode: queueRun?.runtimeMode ?? null,
         activeRun,
+        activeRunCanSteer: activeRun ? legacyRunCanSteer(activeRun.id) : false,
         assignedAgentAdapterType: assignedAgent?.adapterType ?? null,
         queuedCommentCount: comments.length,
       });

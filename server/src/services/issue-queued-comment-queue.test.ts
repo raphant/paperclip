@@ -14,6 +14,32 @@ describe("decideQueuedCommentQueueSteering", () => {
     expect(decision).toEqual({ protocol: "legacy", kind: "unsupported" });
   });
 
+  it("answers available on the legacy protocol while the run's adapter takes messages", () => {
+    const decision = decideQueuedCommentQueueSteering({
+      state: "deferred",
+      queueRunRuntimeMode: null,
+      activeRun: { id: "run-1", runtimeMode: "legacy" },
+      activeRunCanSteer: true,
+      assignedAgentAdapterType: "claude_local",
+      queuedCommentCount: 1,
+    });
+
+    expect(decision).toEqual({ protocol: "legacy", kind: "available" });
+  });
+
+  it("answers temporarily_unavailable on the legacy protocol when nothing is queued for the steerable run", () => {
+    const decision = decideQueuedCommentQueueSteering({
+      state: "deferred",
+      queueRunRuntimeMode: null,
+      activeRun: { id: "run-1", runtimeMode: "legacy" },
+      activeRunCanSteer: true,
+      assignedAgentAdapterType: "claude_local",
+      queuedCommentCount: 0,
+    });
+
+    expect(decision).toEqual({ protocol: "legacy", kind: "temporarily_unavailable" });
+  });
+
   it("answers temporarily_unavailable for a promoted native queue with no deferred run", () => {
     const decision = decideQueuedCommentQueueSteering({
       state: "queued",

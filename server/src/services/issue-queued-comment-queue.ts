@@ -103,6 +103,7 @@ export type QueuedCommentQueueProtocol = "paperclip_runner_v1" | "legacy";
 export type QueuedCommentQueueSteeringDecision =
   | { protocol: QueuedCommentQueueProtocol; kind: "unsupported" }
   | { protocol: QueuedCommentQueueProtocol; kind: "temporarily_unavailable" }
+  | { protocol: "legacy"; kind: "available" }
   /** Only the caller can probe the live runner. `steeringRunId` names the run to probe. */
   | { protocol: "paperclip_runner_v1"; kind: "probe"; steeringRunId: string };
 
@@ -126,6 +127,11 @@ export function decideQueuedCommentQueueSteering(facts: {
   queueRunRuntimeMode: string | null;
   /** The currently running turn, if any. Read only when `state` is `"deferred"`. */
   activeRun: { id: string; runtimeMode: string | null } | null;
+  /**
+   * Whether the active legacy run's adapter takes messages now
+   * (`legacyRunCanSteer`). Native runs ignore it; their caller probes instead.
+   */
+  activeRunCanSteer?: boolean;
   assignedAgentAdapterType: string | null;
   queuedCommentCount: number;
 }): QueuedCommentQueueSteeringDecision {
@@ -142,8 +148,11 @@ export function decideQueuedCommentQueueSteering(facts: {
       ? "paperclip_runner_v1"
       : "legacy";
 
-  if (protocol !== "paperclip_runner_v1") {
-    return { protocol, kind: "unsupported" };
+  if (protocol === "legacy") {
+    if (!facts.activeRunCanSteer) return { protocol, kind: "unsupported" };
+    return facts.state === "deferred" && facts.activeRun && facts.queuedCommentCount > 0
+      ? { protocol, kind: "available" }
+      : { protocol, kind: "temporarily_unavailable" };
   }
 
   const steeringRun = facts.state === "deferred" ? facts.activeRun : null;

@@ -145,7 +145,9 @@ function SortableQueuedMessage({
         {label}
       </span>
 
-      {queue.protocol === "legacy" || entry.source?.requiresFreshSession ? (
+      {/* A legacy run offers Steer only while its adapter takes messages. */}
+      {(queue.protocol === "legacy" && queue.steeringDisposition !== "available") ||
+      entry.source?.requiresFreshSession ? (
         <button
           type="button"
           onClick={onInterrupt}
