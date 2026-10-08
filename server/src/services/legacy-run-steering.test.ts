@@ -40,4 +40,18 @@ describe("legacy run steering", () => {
     });
     expect(onAcknowledged).not.toHaveBeenCalled();
   });
+
+  it("times out a run that does not answer, and still acknowledges a late delivery", async () => {
+    let deliver!: () => void;
+    const onAcknowledged = vi.fn(async () => {});
+    setLegacyRunSteering("run-1", () => new Promise<void>((resolve) => (deliver = resolve)));
+
+    await expect(
+      steerLegacyRun({ runId: "run-1", message: "hi", onAcknowledged, timeoutMs: 20 }),
+    ).rejects.toMatchObject({ code: "steering_timeout" });
+    expect(onAcknowledged).not.toHaveBeenCalled();
+
+    deliver();
+    await vi.waitFor(() => expect(onAcknowledged).toHaveBeenCalledTimes(1));
+  });
 });

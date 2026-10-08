@@ -1374,6 +1374,22 @@ describe("transcriptToTaskChatItems native usage", () => {
     ]);
   });
 
+  it("starts a new message after a steered user message", () => {
+    const items = transcriptToTaskChatItems(
+      [
+        { kind: "assistant", ts: TS, text: "The keeper climbed", delta: true },
+        { kind: "user", ts: TS, text: "The code word is PAPAYA." },
+        { kind: "assistant", ts: TS, text: "WORD=PAPAYA", delta: true },
+      ],
+      { runId: "acp-run", running: true },
+    );
+
+    expect(items).toEqual([
+      expect.objectContaining({ kind: "message", text: "The keeper climbed" }),
+      expect.objectContaining({ kind: "message", text: "WORD=PAPAYA" }),
+    ]);
+  });
+
   it("keeps distinct completed reasoning items separate even on the same channel", () => {
     const items = transcriptToTaskChatItems(
       [

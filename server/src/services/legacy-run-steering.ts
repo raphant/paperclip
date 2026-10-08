@@ -23,14 +23,17 @@ export function legacyRunCanSteer(runId: string): boolean {
 /**
  * Delivers a queued message into a running legacy run, with the same contract
  * as `steerNativeSession`. A legacy run has no provider turn ids, so the run id
- * stands for the turn. Every failure is a `NativeSessionSteeringError` that is
- * not a timeout, so the steer route rejects the reserved identity and the
- * message stays queued.
+ * stands for the turn. A refusal is `steering_rejected`, so the steer route
+ * rejects the reserved identity and the message stays queued. A run that does
+ * not answer within `timeoutMs` (default 10 s) is `steering_timeout`: the route
+ * treats that as uncertain, and `onAcknowledged` still settles the identity if
+ * the run takes the message later.
  */
 export async function steerLegacyRun(input: {
   runId: string;
   message: string;
   onAcknowledged?: () => Promise<void>;
+  timeoutMs?: number;
 }): Promise<{ turnId: string }> {
   const steer = steerByRunId.get(input.runId);
   if (!steer) {
@@ -39,15 +42,37 @@ export async function steerLegacyRun(input: {
       "The run no longer takes messages.",
     );
   }
+  const delivery = Promise.resolve()
+    .then(() => steer(input.message))
+    .catch((error: unknown) => {
+      throw new NativeSessionSteeringError(
+        "steering_rejected",
+        error instanceof Error ? error.message : "The run did not take the message.",
+      );
+    });
+  // Like the native path: settle the identity outside the route's lock, which
+  // is held until this returns.
+  if (input.onAcknowledged)
+    void delivery.then(input.onAcknowledged).catch(() => undefined);
+  let timeout: ReturnType<typeof setTimeout> | null = null;
   try {
-    await steer(input.message);
-  } catch (error) {
-    throw new NativeSessionSteeringError(
-      "steering_rejected",
-      error instanceof Error ? error.message : "The run did not take the message.",
-    );
+    await Promise.race([
+      delivery,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(
+          () =>
+            reject(
+              new NativeSessionSteeringError(
+                "steering_timeout",
+                "The run did not take the message in time.",
+              ),
+            ),
+          input.timeoutMs ?? 10_000,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
-  // Like the native path: settle the identity outside the route's lock.
-  if (input.onAcknowledged) void input.onAcknowledged().catch(() => undefined);
   return { turnId: input.runId };
 }

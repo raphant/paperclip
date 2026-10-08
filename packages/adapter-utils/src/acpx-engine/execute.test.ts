@@ -1119,6 +1119,63 @@ describe("shared ACPX engine runtime behavior", () => {
     expect(result.summary).not.toContain("hidden chain of thought");
   });
 
+  it("hands a local Claude turn's steer function to the server and splits the output at a steer", async () => {
+    const root = await makeTempRoot();
+    const stateDir = path.join(root, "state");
+    const steerables: Array<((message: string) => Promise<void>) | null> = [];
+    const runtimeSteer = vi
+      .fn<(input: { handle: unknown; text: string }) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("The agent did not take the message (promptRequired)."))
+      .mockResolvedValueOnce(undefined);
+    const logs: string[] = [];
+    const execute = createAcpxEngineExecutor({
+      createRuntime: () => ({
+        ensureSession: async () => ({
+          backendSessionId: "backend-session",
+          agentSessionId: "agent-session",
+          runtimeSessionName: "runtime-session",
+        }),
+        startTurn: () => ({
+          events: (async function* () {
+            yield { type: "text_delta", text: "The keeper climbed", stream: "output", tag: "agent_message_chunk" };
+            const steer = steerables.at(-1)!;
+            await expect(steer("refused")).rejects.toThrow("promptRequired");
+            await steer("The code word is PAPAYA.");
+            yield { type: "text_delta", text: "WORD=PAPAYA", stream: "output", tag: "agent_message_chunk" };
+            yield { type: "done", stopReason: "end_turn" };
+          })(),
+          result: Promise.resolve({ status: "completed", stopReason: "end_turn" }),
+          cancel: async () => {},
+        }),
+        steer: runtimeSteer,
+        close: async () => {},
+      }) as never,
+    });
+
+    const result = await execute({
+      runId: "run-steer",
+      agent: { id: "agent-1", companyId: "company-1" },
+      runtime: {},
+      config: { agent: "claude", agentCommand: "node ./fake-acp.js", stateDir, summaryStrategy: "full" },
+      context: {},
+      onLog: async (_stream: string, text: string) => {
+        logs.push(text);
+      },
+      onMeta: async () => {},
+      onSteerable: (steer: ((message: string) => Promise<void>) | null) => steerables.push(steer),
+    } as never);
+
+    expect(result.exitCode).toBe(0);
+    expect(steerables.map((steer) => typeof steer)).toEqual(["function", "object"]);
+    expect(steerables.at(-1)).toBeNull();
+    expect(runtimeSteer).toHaveBeenLastCalledWith(
+      expect.objectContaining({ text: "The code word is PAPAYA." }),
+    );
+    const userLines = logs.filter((line) => line.includes('"acpx.user_message"'));
+    expect(userLines.map((line) => JSON.parse(line).text)).toEqual(["The code word is PAPAYA."]);
+    expect(result.summary).toBe("WORD=PAPAYA");
+  });
+
   it("treats a statusless initial tool call as an output-segment boundary", async () => {
     const root = await makeTempRoot();
     const stateDir = path.join(root, "state");

@@ -4764,6 +4764,24 @@ export function createAcpxEngineExecutor(deps: AcpxEngineExecutorOptions = {}) {
             : {}),
         });
         activeTurn = turn;
+        // Steer (fork): a local Claude run hands the server a function that sends
+        // a queued chat message into this turn through Claude ACP's
+        // `_session/steering`. The message is logged as a user entry and ends the
+        // output segment, so the cut-off draft and the new answer stay apart in
+        // the chat and in the run summary. Cleared when the event relay ends.
+        if (
+          ctx.onSteerable &&
+          runtime.steer &&
+          prepared.acpxAgent === "claude" &&
+          prepared.remoteExecutionIdentity === null
+        ) {
+          const steerRuntime = runtime;
+          ctx.onSteerable(async (message) => {
+            await steerRuntime.steer!({ handle: sessionHandle, text: message });
+            flushOutputSegment();
+            await emitAcpxLog(ctx, { type: "acpx.user_message", text: message });
+          });
+        }
         // A latched sandbox duplex-channel loss otherwise has no way to reach
         // this turn: the bridge only exposes a pull read, and the engine
         // pulls it at the terminal-finalization boundary, which runs only
@@ -4871,6 +4889,7 @@ export function createAcpxEngineExecutor(deps: AcpxEngineExecutorOptions = {}) {
           drainEvents.then(() => true as const),
           lossDeadline.then(() => false as const),
         ]);
+        ctx.onSteerable?.(null);
         if (!eventsEnded) {
           // The deadline won: stop waiting on the agent. `closeStream` ends
           // the event drain locally, with no agent cooperation required. Await

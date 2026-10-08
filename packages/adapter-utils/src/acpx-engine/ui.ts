@@ -86,6 +86,12 @@ export function parseAcpxStdoutLine(line: string, ts: string): TranscriptEntry[]
     }];
   }
 
+  // A chat message steered into the running turn (fork).
+  if (type === "acpx.user_message") {
+    const text = asString(parsed.text);
+    return text ? [{ kind: "user", ts, text }] : [];
+  }
+
   if (type === "acpx.tool_call") {
     const status = asString(parsed.status);
     const text = asString(parsed.text);

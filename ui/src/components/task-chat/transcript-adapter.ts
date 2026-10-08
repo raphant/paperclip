@@ -1006,7 +1006,13 @@ export function transcriptToTaskChatItems(
         if (entry.contextUsage) latestContextUsage = entry.contextUsage;
         break;
       }
-      // init / stderr / stdout / user and non-runner result entries carry no
+      case "user": {
+        // A message steered into the run. The chat shows it as the queued
+        // comment, so only end the open message: text after it is a new answer.
+        resetInline();
+        break;
+      }
+      // init / stderr / stdout and non-runner result entries carry no
       // thread-visible content (status is rendered separately).
       default:
         break;

@@ -117,5 +117,9 @@ export function printAcpxStreamEvent(raw: string, debug: boolean): void {
     console.log(pc.red(`error: ${asString(parsed.message, line)}`));
     return;
   }
+  if (type === "acpx.user_message") {
+    console.log(pc.cyan(`user: ${asString(parsed.text)}`));
+    return;
+  }
   console.log(debug ? pc.gray(line) : line);
 }

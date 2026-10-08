@@ -1,5 +1,5 @@
 diff --git a/dist/live-checkpoint-ClPCSdrW.js b/dist/live-checkpoint-ClPCSdrW.js
-index 243c9d13bcba520923b63adfddad75cf2d94362d..4c39306189bcb9b53f95ff7ce0be55e160b2d1a3 100644
+index 243c9d13bcba520923b63adfddad75cf2d94362d..71ec5ceaf5d5673c6cd0503d1880facc967b114f 100644
 --- a/dist/live-checkpoint-ClPCSdrW.js
 +++ b/dist/live-checkpoint-ClPCSdrW.js
 @@ -1532,7 +1532,7 @@ const ZED_TAG_KEYS = /* @__PURE__ */ new Set([
@@ -96,7 +96,31 @@ index 243c9d13bcba520923b63adfddad75cf2d94362d..4c39306189bcb9b53f95ff7ce0be55e1
  		};
  	}
  	logAgentLaunch(plan) {
-@@ -6070,6 +6090,27 @@ async function withConnectedSession(options) {
+@@ -4389,6 +4409,23 @@ var AcpClient = class {
+ 		await this.cancel(active.sessionId);
+ 		return true;
+ 	}
++	// Paperclip: sends a message into the running prompt through Claude ACP's
++	// `_session/steering`. `promptRequired` makes an idle session refuse instead
++	// of starting a turn nobody reads. Throws unless the agent answers `injected`.
++	async steerActivePrompt(text) {
++		const active = this.activePrompt;
++		if (!active) throw new Error("No running turn to steer.");
++		const connection = this.getConnection();
++		const response = await this.runConnectionRequest(() => connection.extMethod("_session/steering", {
++			sessionId: active.sessionId,
++			prompt: [{
++				type: "text",
++				text
++			}],
++			_meta: { steering: { idleBehavior: "promptRequired" } }
++		}));
++		if (response?.outcome !== "injected") throw new Error(`The agent did not take the message (${response?.outcome ?? "no answer"}${response?.reason ? `: ${response.reason}` : ""}).`);
++	}
+ 	async cancelActivePrompt(waitMs = 2500) {
+ 		const active = this.activePrompt;
+ 		if (!active) return;
+@@ -6070,6 +6107,27 @@ async function withConnectedSession(options) {
  //#region src/runtime/engine/prompt-turn.ts
  const SESSION_REPLY_IDLE_MS = 1e3;
  const SESSION_REPLY_DRAIN_TIMEOUT_MS = 5e3;
@@ -124,7 +148,7 @@ index 243c9d13bcba520923b63adfddad75cf2d94362d..4c39306189bcb9b53f95ff7ce0be55e1
  async function runPromptTurn(params) {
  	try {
  		const promptPromise = params.client.prompt(params.sessionId, params.prompt);
-@@ -6079,6 +6120,19 @@ async function runPromptTurn(params) {
+@@ -6079,6 +6137,19 @@ async function runPromptTurn(params) {
  			idleMs: SESSION_REPLY_IDLE_MS,
  			timeoutMs: SESSION_REPLY_DRAIN_TIMEOUT_MS
  		}).catch(() => {});
@@ -145,7 +169,7 @@ index 243c9d13bcba520923b63adfddad75cf2d94362d..4c39306189bcb9b53f95ff7ce0be55e1
  		return {
  			stopReason: response.stopReason,
 diff --git a/dist/runtime.d.ts b/dist/runtime.d.ts
-index ccdbe5b032521518022223733049b8b38793473b..416bdaae1450c6e85b34afd154349770f9f7b0a9 100644
+index ccdbe5b032521518022223733049b8b38793473b..ef977d8253f46eceeab39ebcd2027e7852756d41 100644
 --- a/dist/runtime.d.ts
 +++ b/dist/runtime.d.ts
 @@ -45,6 +45,7 @@ type AcpRuntimeTurnAttachment = {
@@ -156,7 +180,19 @@ index ccdbe5b032521518022223733049b8b38793473b..416bdaae1450c6e85b34afd154349770
    handle: AcpRuntimeHandle;
    text: string;
    attachments?: AcpRuntimeTurnAttachment[];
-@@ -266,6 +267,10 @@ type AcpRuntimeOptions = {
+@@ -241,6 +242,11 @@ interface AcpRuntime {
+     handle: AcpRuntimeHandle;
+     reason?: string;
+   }): Promise<void>;
++  /** Paperclip: send a message into the running turn; throws unless the agent took it. */
++  steer?(input: {
++    handle: AcpRuntimeHandle;
++    text: string;
++  }): Promise<void>;
+   close(input: {
+     handle: AcpRuntimeHandle;
+     reason: string;
+@@ -266,6 +272,10 @@ type AcpRuntimeOptions = {
    timeoutMs?: number;
    probeAgent?: string;
    verbose?: boolean;
@@ -167,7 +203,7 @@ index ccdbe5b032521518022223733049b8b38793473b..416bdaae1450c6e85b34afd154349770
    onPermissionRequest?: (req: AcpPermissionRequest, ctx: {
      signal: AbortSignal;
    }) => Promise<AcpPermissionDecision | undefined>;
-@@ -302,6 +307,7 @@ declare class AcpRuntimeManager {
+@@ -302,6 +312,7 @@ declare class AcpRuntimeManager {
    private createAndSaveRuntimeRecord;
    private keepPersistentClient;
    startTurn(input: {
@@ -175,7 +211,7 @@ index ccdbe5b032521518022223733049b8b38793473b..416bdaae1450c6e85b34afd154349770
      handle: AcpRuntimeHandle;
      text: string;
      attachments?: AcpRuntimeTurnAttachment[];
-@@ -334,6 +340,7 @@ declare class AcpRuntimeManager {
+@@ -334,6 +345,7 @@ declare class AcpRuntimeManager {
    private finalizeRuntimeTurn;
    private finalizeRuntimeTurnRecord;
    runTurn(input: {
@@ -183,8 +219,27 @@ index ccdbe5b032521518022223733049b8b38793473b..416bdaae1450c6e85b34afd154349770
      handle: AcpRuntimeHandle;
      text: string;
      attachments?: AcpRuntimeTurnAttachment[];
+@@ -347,6 +359,7 @@ declare class AcpRuntimeManager {
+   setMode(handle: AcpRuntimeHandle, mode: string, sessionMode?: "persistent" | "oneshot"): Promise<void>;
+   setConfigOption(handle: AcpRuntimeHandle, key: string, value: string, sessionMode?: "persistent" | "oneshot"): Promise<void>;
+   cancel(handle: AcpRuntimeHandle): Promise<void>;
++  steer(handle: AcpRuntimeHandle, text: string): Promise<void>;
+   close(handle: AcpRuntimeHandle, options?: {
+     discardPersistentState?: boolean;
+   }): Promise<void>;
+@@ -446,6 +459,10 @@ declare class AcpxRuntime implements AcpxRuntimeLike {
+     handle: AcpRuntimeHandle;
+     reason?: string;
+   }): Promise<void>;
++  steer(input: {
++    handle: AcpRuntimeHandle;
++    text: string;
++  }): Promise<void>;
+   close(input: {
+     handle: AcpRuntimeHandle;
+     reason: string;
 diff --git a/dist/runtime.js b/dist/runtime.js
-index 6c9cc999e50a11c399c68b3a0f1b7af4bc2317c0..e06bf4fdee534f3ef56be0387a2f5f8626e697ad 100644
+index 6c9cc999e50a11c399c68b3a0f1b7af4bc2317c0..39471e59b6d2ea334d2c37988aea0126c7f643b2 100644
 --- a/dist/runtime.js
 +++ b/dist/runtime.js
 @@ -744,7 +744,8 @@ var AcpRuntimeManager = class {
@@ -205,7 +260,27 @@ index 6c9cc999e50a11c399c68b3a0f1b7af4bc2317c0..e06bf4fdee534f3ef56be0387a2f5f86
  				timeoutMs: task.input.timeoutMs ?? this.options.timeoutMs,
  				conversation: turn.conversation,
  				promptMessageId: turn.promptMessageId
-@@ -1586,6 +1588,7 @@ var AcpxRuntime = class {
+@@ -1051,6 +1053,7 @@ var AcpRuntimeManager = class {
+ 		return {
+ 			hasActivePrompt: () => turn.client.hasActivePrompt(),
+ 			requestCancelActivePrompt: async () => await this.requestRuntimeTurnCancel(task, turn),
++			steerActivePrompt: async (text) => await turn.client.steerActivePrompt(text),
+ 			setSessionMode: async (modeId) => {
+ 				await this.waitForRuntimeControlSession(task, turn);
+ 				await turn.client.setSessionMode(turn.activeSessionId, modeId);
+@@ -1297,6 +1300,11 @@ var AcpRuntimeManager = class {
+ 	async cancel(handle) {
+ 		await this.activeControllers.get(handle.acpxRecordId ?? handle.sessionKey)?.requestCancelActivePrompt();
+ 	}
++	async steer(handle, text) {
++		const controller = this.activeControllers.get(handle.acpxRecordId ?? handle.sessionKey);
++		if (!controller?.steerActivePrompt) throw new Error("No running turn to steer.");
++		await controller.steerActivePrompt(text);
++	}
+ 	async close(handle, options = {}) {
+ 		const record = await this.requireRecord(handle.acpxRecordId ?? handle.sessionKey);
+ 		if (this.activeControllers.has(record.acpxRecordId)) this.closingActiveRecords.add(record.acpxRecordId);
+@@ -1586,6 +1594,7 @@ var AcpxRuntime = class {
  		const turnPromise = this.getManager().then((manager) => manager.startTurn({
  			handle,
  			text: input.text,
@@ -213,7 +288,7 @@ index 6c9cc999e50a11c399c68b3a0f1b7af4bc2317c0..e06bf4fdee534f3ef56be0387a2f5f86
  			attachments: input.attachments,
  			mode: input.mode,
  			sessionMode: state.mode,
-@@ -1614,6 +1617,7 @@ var AcpxRuntime = class {
+@@ -1614,6 +1623,7 @@ var AcpxRuntime = class {
  		yield* (await this.getManager()).runTurn({
  			handle,
  			text: input.text,
@@ -221,6 +296,17 @@ index 6c9cc999e50a11c399c68b3a0f1b7af4bc2317c0..e06bf4fdee534f3ef56be0387a2f5f86
  			attachments: input.attachments,
  			mode: input.mode,
  			sessionMode: state.mode,
+@@ -1649,6 +1659,10 @@ var AcpxRuntime = class {
+ 		const { handle } = this.resolveManagerHandle(input.handle);
+ 		await (await this.getManager()).cancel(handle);
+ 	}
++	async steer(input) {
++		const { handle } = this.resolveManagerHandle(input.handle);
++		await (await this.getManager()).steer(handle, input.text);
++	}
+ 	async close(input) {
+ 		const { handle } = this.resolveManagerHandle(input.handle);
+ 		await (await this.getManager()).close(handle, { discardPersistentState: input.discardPersistentState });
 diff --git a/dist/session-options-jkYbBxGE.d.ts b/dist/session-options-jkYbBxGE.d.ts
 index 9d37f377fb6a0828e0d2bc5a48754f3aa71509a4..22dda59e0b7616a20ad45218913e5d8f884bae49 100644
 --- a/dist/session-options-jkYbBxGE.d.ts
