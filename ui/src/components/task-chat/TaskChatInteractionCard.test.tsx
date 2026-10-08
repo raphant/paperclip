@@ -336,6 +336,52 @@ describe("TaskChatInteractionCard", () => {
     ).toBeNull();
   });
 
+  it("lets a long target label wrap below the prompt instead of squeezing it", () => {
+    const longLabel =
+      "Team root CLAUDE.md (/Users/enan3003/seveneleven/CLAUDE.md), applied on disk; holds for every agent";
+    const renderTarget = (label: string) => {
+      flushSync(() => {
+        root.render(
+          <TooltipProvider>
+            <ThemeProvider>
+              <TaskChatInteractionCard
+                item={interactionItem(
+                  createRequestConfirmation({
+                    payload: {
+                      version: 1,
+                      prompt: "Keep this rule for every agent?",
+                      target: { type: "custom", key: "rule", label },
+                    },
+                  }),
+                )}
+                presentation="takeover"
+              />
+            </ThemeProvider>
+          </TooltipProvider>,
+        );
+      });
+      const chip = Array.from(container.querySelectorAll("span")).find(
+        (span) => span.textContent === label,
+      );
+      const prompt = Array.from(container.querySelectorAll("p")).find(
+        (p) => p.textContent === "Keep this rule for every agent?",
+      );
+      return { chip, prompt };
+    };
+
+    const long = renderTarget(longLabel);
+    expect(long.prompt?.className).toContain("flex-[1_1_16rem]");
+    expect(long.prompt?.className).not.toMatch(/(^|\s)flex-1(\s|$)/);
+    for (const cls of ["max-w-full", "min-w-0", "[overflow-wrap:anywhere]"]) {
+      expect(long.chip?.className).toContain(cls);
+    }
+    expect(long.chip?.parentElement).toBe(long.prompt?.parentElement);
+
+    const short = renderTarget("CLAUDE.md");
+    expect(short.chip).not.toBeUndefined();
+    expect(short.chip?.parentElement).toBe(short.prompt?.parentElement);
+  });
+
   it("keeps the plan revision in the header and hides the prompt while requesting changes", async () => {
     const interaction = createRequestConfirmation({
       sourceRunId: "run-plan",
