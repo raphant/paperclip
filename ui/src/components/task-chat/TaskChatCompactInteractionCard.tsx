@@ -299,14 +299,14 @@ function CompactTarget({
     return (
       <a
         href={href}
-        className="inline-flex rounded-sm border border-border px-2 py-0.5 font-mono text-xs text-foreground hover:bg-muted/60"
+        className="inline-flex min-w-0 max-w-full rounded-sm border border-border px-2 py-0.5 font-mono text-xs [overflow-wrap:anywhere] text-foreground hover:bg-muted/60"
       >
         {label}
       </a>
     );
   }
   return (
-    <span className="inline-flex rounded-sm border border-border px-2 py-0.5 font-mono text-xs text-muted-foreground">
+    <span className="inline-flex min-w-0 max-w-full rounded-sm border border-border px-2 py-0.5 font-mono text-xs [overflow-wrap:anywhere] text-muted-foreground">
       {label}
     </span>
   );
@@ -860,7 +860,7 @@ function ConfirmationCard({
         />
       ) : isPlanConfirmation && rejecting ? null : (
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <p className="min-w-0 flex-1 text-sm leading-5 text-foreground">
+          <p className="min-w-0 flex-[1_1_16rem] text-sm leading-5 text-foreground">
             {isPlanConfirmation
               ? "Do you accept this plan?"
               : interaction.payload.prompt}
@@ -1148,7 +1148,7 @@ function CheckboxConfirmationCard({
   return (
     <div>
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <p className="min-w-0 flex-1 text-sm leading-5 text-foreground">
+        <p className="min-w-0 flex-[1_1_16rem] text-sm leading-5 text-foreground">
           {interaction.payload.prompt}
         </p>
         <CompactTarget interaction={interaction} />
