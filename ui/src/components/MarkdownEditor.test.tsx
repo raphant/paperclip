@@ -896,6 +896,54 @@ describe("MarkdownEditor", () => {
     });
   });
 
+  it("leaves a markdown paste inside a nested code block", async () => {
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(<MarkdownEditor value="```txt\n\n```" onChange={() => {}} />);
+    });
+    await flush();
+
+    const editable = container.querySelector('[data-testid="mdx-editor"]') as HTMLDivElement;
+    const code = document.createElement("div");
+    code.className = "cm-content";
+    code.setAttribute("contenteditable", "true");
+    const text = document.createTextNode("");
+    code.appendChild(text);
+    editable.appendChild(code);
+
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.collapse(true);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    code.focus();
+
+    const pasted = "- keep this line in the code block\n- and this one";
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", {
+      configurable: true,
+      value: {
+        types: ["text/plain"],
+        getData: (type: string) => (type === "text/plain" ? pasted : ""),
+      },
+    });
+    const innerPaste = vi.fn();
+    code.addEventListener("paste", innerPaste);
+
+    await act(async () => {
+      code.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(mdxEditorMockState.insertedMarkdownValues).toEqual([]);
+    expect(innerPaste).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      root.unmount();
+    });
+  });
+
   it("escapes angle brackets in pasted markdown", async () => {
     const root = createRoot(container);
 
