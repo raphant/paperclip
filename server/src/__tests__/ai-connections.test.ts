@@ -74,7 +74,8 @@ describe("managed AI connections", () => {
         expect(await readFile(path.join(subEnv.CODEX_HOME, "auth.json"), "utf8")).toBe(token);
         expect(JSON.parse(await readFile(path.join(apiEnvValues.CODEX_HOME, "auth.json"), "utf8"))).toEqual({ OPENAI_API_KEY: "fixture-api" });
       }
-      expect(subEnv.HOME).not.toBe(apiEnvValues.HOME);
+      expect(subEnv.HOME).toBeUndefined();
+      expect(subEnv.CLAUDE_CONFIG_DIR).not.toBe(apiEnvValues.CLAUDE_CONFIG_DIR);
       expect(subRun.identity).not.toBe(apiRun.identity);
       expect(subRun.config.model).toBe(bot.config.model);
       expect(apiRun.config.model).toBe(bot.config.model);
@@ -209,9 +210,23 @@ describe("managed AI connections", () => {
     const [a,b] = await Promise.all(["alice", "bob"].map(responsibleUserId => prepareManagedAiRuntime(db, { ...input, responsibleUserId, config })));
     const ae = a.config.env as Record<string,string>, be = b.config.env as Record<string,string>;
     expect(ae.ANTHROPIC_API_KEY).toBe("fixture-Alice second"); expect(be.ANTHROPIC_API_KEY).toBe("fixture-Bob first");
-    expect(ae.HOME).not.toBe(be.HOME); expect(a.identity).not.toBe(b.identity);
+    expect(ae.CLAUDE_CONFIG_DIR).not.toBe(be.CLAUDE_CONFIG_DIR); expect(a.identity).not.toBe(b.identity);
     expect(a.config.model).toBe("unchanged-model"); expect(config.env.ANTHROPIC_API_KEY).toBe("project-never-use");
-    await Promise.all([a.cleanup(), b.cleanup()]); await expect(access(ae.HOME)).rejects.toThrow();
+    await Promise.all([a.cleanup(), b.cleanup()]); await expect(access(ae.CLAUDE_CONFIG_DIR)).rejects.toThrow();
+  });
+  it("leaves HOME and XDG to the host, except for opencode, which keeps its auth under XDG", async () => {
+    const claude = await prepareManagedAiRuntime(db, { ...input, responsibleUserId: "alice", config: { model: "m", env: { XDG_DATA_HOME: "/configured/data" } } });
+    const userId = "opencode-home-user";
+    await db.insert(companyMemberships).values({ companyId, principalId: userId, principalType: "user", status: "active", membershipRole: "member" });
+    await service.save(companyId, userId, { provider: "openrouter", method: "api_key", ownership: "personal", name: "OpenRouter", apiKey: "fixture", agentIds: [], allAgents: true }, "fixture-openrouter");
+    const opencode = await prepareManagedAiRuntime(db, { ...input, adapterType: "opencode_local", binding: { provider: "openrouter", method: "api_key", mode: "responsible_user" }, responsibleUserId: userId, config: { model: "openrouter/fixture" } });
+    try {
+      const ce = claude.config.env as Record<string, string>, oe = opencode.config.env as Record<string, string>;
+      expect(ce.HOME).toBeUndefined(); expect(ce.XDG_CONFIG_HOME).toBeUndefined();
+      expect(ce.XDG_DATA_HOME).toBe("/configured/data");
+      expect(ce.CLAUDE_CONFIG_DIR.startsWith(claude.home!)).toBe(true);
+      expect(oe.HOME).toBe(opencode.home); expect(oe.XDG_DATA_HOME.startsWith(opencode.home!)).toBe(true);
+    } finally { await Promise.all([claude.cleanup(), opencode.cleanup()]); }
   });
   it("blocks missing identity, incompatible providers, and cross-company explicit selections", async () => {
     await expect(service.select({ ...input, userId: null })).rejects.toThrow("responsible user");

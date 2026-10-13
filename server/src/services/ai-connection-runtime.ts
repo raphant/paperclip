@@ -260,10 +260,21 @@ export async function prepareManagedAiRuntime(
     );
     const providerHome = path.join(home, "provider");
     await mkdir(providerHome, { mode: 0o700 });
+    // Local fork change: Claude, Codex and Grok each move their credential
+    // store with their own variable (CLAUDE_CONFIG_DIR, CODEX_HOME,
+    // GROK_HOME), so the run keeps the host's HOME and XDG dirs. A private
+    // HOME made git, glab, kubectl, nvm and Playwright fail as if logged out.
+    // opencode keeps its auth under XDG, so only OpenRouter keeps the private home.
+    const managedEnv = managedAiHomeEnvironment(home);
+    if (input.binding.provider !== "openrouter") {
+      delete managedEnv.HOME;
+      delete managedEnv.XDG_CONFIG_HOME;
+      delete managedEnv.XDG_DATA_HOME;
+    }
     const env: Record<string, unknown> = {
       ...stripAiAuthBindings(input.config.env),
       ...Object.fromEntries(AI_AUTH_ENV_KEYS.map((key) => [key, ""])),
-      ...managedAiHomeEnvironment(home),
+      ...managedEnv,
     };
     const capability =
       AI_CONNECTION_CAPABILITIES[input.binding.provider].methods[
