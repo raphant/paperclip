@@ -341,6 +341,11 @@ import {
 } from "../services/native-runtime/native-session-executor.js";
 import { legacyRunCanSteer, steerLegacyRun } from "../services/legacy-run-steering.js";
 import {
+  autoSteerIssueComment,
+  commentAuthorAgentName,
+  steeringMessageText,
+} from "../services/comment-auto-steer.js";
+import {
   buildQueuedCommentQueueSnapshot,
   decideQueuedCommentQueueSteering,
   queuedCommentIdsFromWakePayload,
@@ -6924,6 +6929,22 @@ export function issueRoutes(
     }
 
     return runToInterrupt?.status === "running" ? runToInterrupt : null;
+  }
+
+  /** Fork: steers a new comment into the assignee's live run instead of queuing its wake; false means queue it (`comment-auto-steer.ts`). */
+  async function autoSteerCommentIntoLiveRun(
+    req: Request,
+    issue: Parameters<typeof autoSteerIssueComment>[1]["issue"] & {
+      executionRunId?: string | null;
+    },
+    comment: Parameters<typeof autoSteerIssueComment>[1]["comment"],
+  ) {
+    return autoSteerIssueComment(db, {
+      issue,
+      comment,
+      run: await resolveActiveIssueRun(issue),
+      actor: getActorInfo(req),
+    });
   }
 
   type IssueQueueDb = Db | Parameters<Parameters<Db["transaction"]>[0]>[0];
@@ -14717,7 +14738,11 @@ export function issueRoutes(
             assigneeId &&
             !assigneeChanged &&
             !goalCommentSteered &&
-            shouldWakeAssigneeForComment
+            shouldWakeAssigneeForComment &&
+            // Fork: a comment steered into the live run needs no queued wake.
+            (reopened ||
+              interruptedRunId ||
+              !(await autoSteerCommentIntoLiveRun(req, issue, comment)))
           ) {
             addWakeup(assigneeId, {
               source: "automation",
@@ -15711,7 +15736,11 @@ export function issueRoutes(
           steeringDeliveryAttempted = true;
           const delivery = {
             runId: locked.activeRun.id,
-            message: entry.comment.body,
+            message: steeringMessageText({
+              body: entry.comment.body,
+              authorAgentName: await commentAuthorAgentName(db, entry.comment),
+              issueIdentifier: issue.identifier,
+            }),
             onAcknowledged: steeringIdentity
               ? () => reconcileSteeredIdentity(db, steeringIdentity)
               : undefined,
@@ -18162,7 +18191,11 @@ export function issueRoutes(
                 ...(interruptedRunId ? { interruptedRunId } : {}),
               },
             });
-          } else {
+          } else if (
+            // Fork: a comment steered into the live run needs no queued wake.
+            interruptedRunId ||
+            !(await autoSteerCommentIntoLiveRun(req, wakeIssueSnapshot, comment))
+          ) {
             addWakeup(assigneeId, {
               source: "automation",
               triggerDetail: "system",

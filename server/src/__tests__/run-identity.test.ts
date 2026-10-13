@@ -125,6 +125,19 @@ const support = await getEmbeddedPostgresTestSupport();
     await acceptSteeredIdentity(db, b!);
     expect((await captureRunIdentity(db, input)).context?.responsibleUserId).toBe("A");
   });
+  it("steers an agent's message without a new identity revision", async () => {
+    const input = await seed();
+    await initializeRunIdentity(db, { ...input, messageIds: [input.messageIds[0]], responsibleUserId: "A", cause: "instruction" });
+    const before = await listRunIdentityContexts(db, input.companyId, input.runId);
+    const agentMessageId = randomUUID();
+    await db.insert(issueComments).values({ id: agentMessageId, companyId: input.companyId, issueId: input.issueId, authorAgentId: input.agentId, body: "Rebase first" });
+    expect(await reserveSteeredIdentity(db, { ...input, messageId: agentMessageId })).toBeNull();
+    expect(await listRunIdentityContexts(db, input.companyId, input.runId)).toHaveLength(before.length);
+    expect((await captureRunIdentity(db, input)).context?.responsibleUserId).toBe("A");
+    const orphanId = randomUUID();
+    await db.insert(issueComments).values({ id: orphanId, companyId: input.companyId, issueId: input.issueId, body: "No author" });
+    await expect(reserveSteeredIdentity(db, { ...input, messageId: orphanId })).rejects.toThrow(/authenticated message author/);
+  });
   it("keeps rejected steering unchanged and preserves the originating identity on retry", async () => {
     const input = await seed();
     await initializeRunIdentity(db, { ...input, messageIds: [], responsibleUserId: "A", cause: "instruction" });

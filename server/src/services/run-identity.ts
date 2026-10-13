@@ -348,6 +348,24 @@ export async function reserveSteeredIdentity(
       .for("update");
     // Processes started before the broker rollout keep their original environment.
     if (!run?.activeIdentityContextId) return null;
+    // Fork: an agent's message keeps the run's identity, as it does when it
+    // wakes a run (`initializeRunIdentity` adds revisions only for people).
+    if (input.source !== "interaction") {
+      const [comment] = await tx
+        .select({
+          authorAgentId: issueComments.authorAgentId,
+          authorUserId: issueComments.authorUserId,
+        })
+        .from(issueComments)
+        .where(
+          and(
+            eq(issueComments.id, input.messageId),
+            eq(issueComments.companyId, input.companyId),
+            eq(issueComments.issueId, input.issueId),
+          ),
+        );
+      if (comment?.authorAgentId && !comment.authorUserId) return null;
+    }
     const [pending] = await tx
       .select()
       .from(runIdentityContexts)
