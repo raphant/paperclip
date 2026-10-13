@@ -191,6 +191,40 @@ describe("TaskChatQueuedMessages", () => {
     );
   });
 
+  it("explains a refused steer and offers Interrupt next to Steer", async () => {
+    const props = render({
+      queue: { ...queue, protocol: "legacy", steeringDisposition: "available" },
+      onSteer: vi.fn().mockRejectedValue({ body: { error: "Steering was rejected", code: "steering_rejected" } }),
+      onInterrupt: vi.fn().mockResolvedValue(undefined),
+    });
+    expect(container.querySelector('[data-testid="task-chat-queued-interrupt-comment-1"]')).toBeNull();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="task-chat-queued-steer-comment-1"]')?.click();
+    });
+
+    const notice = container.querySelector('[data-testid="task-chat-queued-notice"]');
+    expect(notice?.textContent).toBe("The agent is between turns. It gets this message when this run ends.");
+    expect(notice?.className).toContain("text-muted-foreground");
+    expect(container.querySelector('[data-testid="task-chat-queued-steer-comment-1"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="task-chat-queued-interrupt-comment-2"]')).toBeNull();
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="task-chat-queued-interrupt-comment-1"]')?.click();
+    });
+    expect(props.onInterrupt).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the server's message for a steer failure it has no copy for", async () => {
+    render({
+      onSteer: vi.fn().mockRejectedValue({ body: { error: "Board user context required" } }),
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-testid="task-chat-queued-steer-comment-1"]')?.click();
+    });
+    const notice = container.querySelector('[data-testid="task-chat-queued-notice"]');
+    expect(notice?.textContent).toBe("Couldn’t steer: Board user context required");
+    expect(notice?.className).toContain("text-destructive");
+  });
+
   it("disables steering when the provider does not advertise it", () => {
     render({ queue: { ...queue, steeringDisposition: "unsupported" } });
     expect(

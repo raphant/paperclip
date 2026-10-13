@@ -65,6 +65,39 @@ function queueActionErrorCode(error: unknown): string | null {
   return typeof detailCode === "string" ? detailCode : null;
 }
 
+type QueueNotice = { text: string; tone: "info" | "error" };
+
+/**
+ * Fork change (Local changes in paperclip-ops `CLAUDE.md`): the line a failed
+ * Steer shows under the queue, by the steer route's error code. The usual
+ * cases are not faults, so they read grey; an unknown code shows the
+ * server's own message.
+ */
+export function steerFailureNotice(error: unknown): QueueNotice {
+  switch (queueActionErrorCode(error)) {
+    case "steering_rejected":
+      return { tone: "info", text: "The agent is between turns. It gets this message when this run ends." };
+    case "steering_temporarily_unavailable":
+      return { tone: "info", text: "This run has stopped taking messages. It gets this message when the run ends." };
+    case "steering_timeout":
+      return {
+        tone: "error",
+        text: "The agent didn’t confirm within 10 seconds. It may still read it; the message stays queued in case.",
+      };
+    case "queued_comment_stale_target":
+    case "queued_comment_not_pending":
+      return { tone: "info", text: "This message already went out, or its run ended." };
+    case "queued_comment_revision_conflict":
+      return { tone: "error", text: "The queue changed in another session. Review it and try again." };
+  }
+  const body = (error as { body?: { error?: unknown } } | null)?.body;
+  const serverText = typeof body?.error === "string" ? body.error : null;
+  return {
+    tone: "error",
+    text: serverText ? `Couldn’t steer: ${serverText}` : "Couldn’t steer. Message is still queued.",
+  };
+}
+
 export interface TaskChatQueuedMessagesProps {
   queue: IssueQueuedCommentQueue;
   onEdit: (commentId: string) => void;
@@ -80,6 +113,7 @@ function SortableQueuedMessage({
   busy,
   queueMutationDisabled,
   action,
+  steerFailed,
   onEdit,
   onSteer,
   onInterrupt,
@@ -90,6 +124,8 @@ function SortableQueuedMessage({
   busy: boolean;
   queueMutationDisabled: boolean;
   action: QueueAction;
+  /** A Steer of this row just failed, so Interrupt is offered next to it. */
+  steerFailed: boolean;
   onEdit: () => void;
   onSteer: () => void;
   onInterrupt?: () => void;
@@ -113,6 +149,23 @@ function SortableQueuedMessage({
       : queue.steeringDisposition === "temporarily_unavailable"
         ? "Steering is temporarily unavailable"
         : "Steer this message into the active turn";
+  const interruptButton = (
+    <button
+      type="button"
+      onClick={onInterrupt}
+      disabled={busy || !queue.queueId || !onInterrupt}
+      title={queue.targetRunId ? "Interrupt the active turn and send queued messages" : "Send queued messages now"}
+      className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+      data-testid={`task-chat-queued-interrupt-${entry.comment.id}`}
+    >
+      {action === "interrupt" ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+      ) : (
+        <CornerDownRight className="h-3.5 w-3.5" aria-hidden />
+      )}
+      Interrupt
+    </button>
+  );
 
   return (
     <div
@@ -148,37 +201,26 @@ function SortableQueuedMessage({
       {/* A legacy run offers Steer only while its adapter takes messages. */}
       {(queue.protocol === "legacy" && queue.steeringDisposition !== "available") ||
       entry.source?.requiresFreshSession ? (
-        <button
-          type="button"
-          onClick={onInterrupt}
-          disabled={busy || !queue.queueId || !onInterrupt}
-          title={queue.targetRunId ? "Interrupt the active turn and send queued messages" : "Send queued messages now"}
-          className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
-          data-testid={`task-chat-queued-interrupt-${entry.comment.id}`}
-        >
-          {action === "interrupt" ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-          ) : (
-            <CornerDownRight className="h-3.5 w-3.5" aria-hidden />
-          )}
-          Interrupt
-        </button>
+        interruptButton
       ) : (
-        <button
-          type="button"
-          onClick={onSteer}
-          disabled={steerDisabled}
-          title={steerTitle}
-          className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
-          data-testid={`task-chat-queued-steer-${entry.comment.id}`}
-        >
-          {action === "steer" ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-          ) : (
-            <CornerDownRight className="h-3.5 w-3.5" aria-hidden />
-          )}
-          Steer
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={onSteer}
+            disabled={steerDisabled}
+            title={steerTitle}
+            className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+            data-testid={`task-chat-queued-steer-${entry.comment.id}`}
+          >
+            {action === "steer" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+            ) : (
+              <CornerDownRight className="h-3.5 w-3.5" aria-hidden />
+            )}
+            Steer
+          </button>
+          {steerFailed && onInterrupt ? interruptButton : null}
+        </>
       )}
 
       <button
@@ -240,7 +282,8 @@ export function TaskChatQueuedMessages({
   } | null>(null);
   const [reordering, setReordering] = useState(false);
   const [announcement, setAnnouncement] = useState("");
-  const [visibleError, setVisibleError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<QueueNotice | null>(null);
+  const [steerFailedId, setSteerFailedId] = useState<string | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, {
@@ -279,7 +322,7 @@ export function TaskChatQueuedMessages({
     const to = next.findIndex((entry) => entry.comment.id === activeCommentId);
     setEntries(next);
     setReordering(true);
-    setVisibleError(null);
+    setNotice(null);
     setAnnouncement(
       `Moved queued message to position ${to + 1} of ${next.length}.`,
     );
@@ -288,11 +331,13 @@ export function TaskChatQueuedMessages({
     } catch (error) {
       setEntries(previous);
       setAnnouncement("");
-      setVisibleError(
-        queueActionErrorCode(error) === "queued_comment_revision_conflict"
-          ? "The queue changed in another session. Its latest order has been restored."
-          : "Couldn’t reorder. Previous order restored.",
-      );
+      setNotice({
+        tone: "error",
+        text:
+          queueActionErrorCode(error) === "queued_comment_revision_conflict"
+            ? "The queue changed in another session. Its latest order has been restored."
+            : "Couldn’t reorder. Previous order restored.",
+      });
     } finally {
       setReordering(false);
     }
@@ -313,7 +358,8 @@ export function TaskChatQueuedMessages({
     }
     const previous = entries;
     setPending({ commentId, action });
-    setVisibleError(null);
+    setNotice(null);
+    setSteerFailedId(null);
     setAnnouncement(
       action === "steer"
         ? "Steering queued message."
@@ -346,17 +392,22 @@ export function TaskChatQueuedMessages({
       if (action === "steer") setEntries(previous);
       setAnnouncement("");
       const code = queueActionErrorCode(error);
-      setVisibleError(
-        code === "queued_comment_already_dispatching"
-          ? "Too late to discard: this message is already being sent."
-          : action === "steer"
-            ? "Couldn’t steer. Message is still queued."
-            : action === "interrupt"
-              ? "Couldn’t interrupt. Message is still queued."
-              : code === "queued_comment_revision_conflict"
-                ? "The queue changed in another session. Review it and try again."
-                : "Couldn’t discard. Message is still queued.",
-      );
+      if (action === "steer") {
+        setNotice(steerFailureNotice(error));
+        setSteerFailedId(commentId);
+      } else {
+        setNotice({
+          tone: "error",
+          text:
+            code === "queued_comment_already_dispatching"
+              ? "Too late to discard: this message is already being sent."
+              : action === "interrupt"
+                ? "Couldn’t interrupt. Message is still queued."
+                : code === "queued_comment_revision_conflict"
+                  ? "The queue changed in another session. Review it and try again."
+                  : "Couldn’t discard. Message is still queued.",
+        });
+      }
     } finally {
       setPending(null);
     }
@@ -396,6 +447,7 @@ export function TaskChatQueuedMessages({
                 busy={busy}
                 queueMutationDisabled={queueMutationDisabled}
                 action={action}
+                steerFailed={steerFailedId === entry.comment.id}
                 onEdit={() => onEdit(entry.comment.id)}
                 onSteer={() => void runRowAction(entry.comment.id, "steer")}
                 onInterrupt={
@@ -409,13 +461,19 @@ export function TaskChatQueuedMessages({
           })}
         </SortableContext>
       </DndContext>
-      {visibleError ? (
+      {notice ? (
         <div
           role="status"
           aria-live="polite"
-          className="border-t border-destructive/20 bg-destructive/5 px-3 py-1.5 text-xs text-destructive"
+          className={cn(
+            "border-t px-3 py-1.5 text-xs",
+            notice.tone === "error"
+              ? "border-destructive/20 bg-destructive/5 text-destructive"
+              : "border-border/60 bg-muted/30 text-muted-foreground",
+          )}
+          data-testid="task-chat-queued-notice"
         >
-          {visibleError}
+          {notice.text}
         </div>
       ) : null}
       <div className="sr-only" aria-live="polite" aria-atomic="true">
