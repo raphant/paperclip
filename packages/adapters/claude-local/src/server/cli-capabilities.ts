@@ -84,7 +84,7 @@ async function probeClaudeCommandVersion(input: {
     {
       cwd: input.cwd,
       env: input.env,
-      timeoutSec: Math.max(1, Math.min(input.timeoutSec, 20)),
+      timeoutSec: input.timeoutSec > 0 ? Math.max(1, Math.min(input.timeoutSec, 20)) : 20,
       graceSec: Math.max(1, Math.min(input.graceSec, 5)),
       onLog: async () => {},
     },
@@ -126,7 +126,7 @@ async function probeClaudeCommandSupportsEffortFlag(input: {
     {
       cwd: input.cwd,
       env: input.env,
-      timeoutSec: Math.max(1, Math.min(input.timeoutSec, 20)),
+      timeoutSec: input.timeoutSec > 0 ? Math.max(1, Math.min(input.timeoutSec, 20)) : 20,
       graceSec: Math.max(1, Math.min(input.graceSec, 5)),
       onLog: async () => {},
     },
