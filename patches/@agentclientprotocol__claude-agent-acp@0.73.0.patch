@@ -1,5 +1,5 @@
 diff --git a/dist/acp-agent.js b/dist/acp-agent.js
-index 0214a509eb5e7b777a69e4e34637941c275d27b1..403be02df66e25eee29e7d5bef14627011e02b30 100644
+index 0214a509eb5e7b777a69e4e34637941c275d27b1..cf012b073554ca032fb7e260b1731111e0f0d4ab 100644
 --- a/dist/acp-agent.js
 +++ b/dist/acp-agent.js
 @@ -2922,9 +2922,19 @@ export class ClaudeAcpAgent {
@@ -25,7 +25,29 @@ index 0214a509eb5e7b777a69e4e34637941c275d27b1..403be02df66e25eee29e7d5bef146270
                                      },
                                  });
                              }
-@@ -5311,6 +5321,10 @@ export class ClaudeAcpAgent {
+@@ -2953,6 +2963,21 @@ export class ClaudeAcpAgent {
+                             // failActive a live turn (the held one, or the user's next
+                             // prompt) whose own result recorded a different outcome.
+                             if (isAutonomousResult) {
++                                // Paperclip: a steered turn whose steered messages have all
++                                // echoed keeps its outcome in steeredSettle until an idle.
++                                // While a background subagent is live the CLI sends no idle
++                                // for it, and the one idle after this result pays the debt
++                                // above instead, so the prompt never answered (SEL-542).
++                                // Hand the outcome to the subagent gate here, as the idle
++                                // steer lane does; upstream 0.90 fixes it in the idle lanes.
++                                const steeredTurn = session.activeTurn;
++                                if (isSteering(steeredTurn) &&
++                                    steeredTurn.steeredEchoes.size === 0 &&
++                                    steeredTurn.steeredSettle !== undefined) {
++                                    steeredTurn.deferredSettle = steeredTurn.steeredSettle;
++                                    steeredTurn.steeredEchoes = undefined;
++                                    steeredTurn.steeredSettle = undefined;
++                                }
+                                 settleDeferredIfDrained();
+                                 // With no turn in flight OR QUEUED (also after the settle
+                                 // above), the stretch holds only autonomous prose — close
+@@ -5311,6 +5336,10 @@ export class ClaudeAcpAgent {
              settingSources: ["user", "project", "local"],
              ...(thinking !== undefined && { thinking }),
              ...userProvidedOptions,
@@ -36,7 +58,7 @@ index 0214a509eb5e7b777a69e4e34637941c275d27b1..403be02df66e25eee29e7d5bef146270
              ...(settings && { settings }),
              env,
              // Override certain fields that must be controlled by ACP
-@@ -5318,7 +5332,9 @@ export class ClaudeAcpAgent {
+@@ -5318,7 +5347,9 @@ export class ClaudeAcpAgent {
              includePartialMessages: true,
              forwardSubagentText,
              mcpServers: {
@@ -47,7 +69,7 @@ index 0214a509eb5e7b777a69e4e34637941c275d27b1..403be02df66e25eee29e7d5bef146270
                  ...mcpServers,
                  ...(fileChangeAuditSupport
                      ? { [FILE_CHANGE_AUDIT_SERVER_NAME]: fileChangeAuditSupport.mcpServer }
-@@ -5329,6 +5345,16 @@ export class ClaudeAcpAgent {
+@@ -5329,6 +5360,16 @@ export class ClaudeAcpAgent {
              allowDangerouslySkipPermissions: ALLOW_BYPASS,
              permissionMode: initialPermissionMode,
              canUseTool: this.canUseTool(sessionId),
