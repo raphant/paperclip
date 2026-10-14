@@ -1,0 +1,1 @@
+ALTER TABLE "routine_triggers" ADD COLUMN "event_filter" jsonb;

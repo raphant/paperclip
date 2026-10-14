@@ -18,7 +18,7 @@ import { projects } from "./projects.js";
 import { goals } from "./goals.js";
 import { heartbeatRuns } from "./heartbeat_runs.js";
 import { folders } from "./folders.js";
-import type { RoutineEnvConfig, RoutineRevisionSnapshotV1, RoutineVariable, RoutineWebhookDelivery } from "@paperclipai/shared";
+import type { RoutineEnvConfig, RoutineEventFilter, RoutineRevisionSnapshotV1, RoutineVariable, RoutineWebhookDelivery } from "@paperclipai/shared";
 
 export const routines = pgTable(
   "routines",
@@ -123,6 +123,7 @@ export const routineTriggers = pgTable(
     secretId: uuid("secret_id").references(() => companySecrets.id, { onDelete: "set null" }),
     signingMode: text("signing_mode"),
     replayWindowSec: integer("replay_window_sec"),
+    eventFilter: jsonb("event_filter").$type<RoutineEventFilter>(),
     lastRotatedAt: timestamp("last_rotated_at", { withTimezone: true }),
     lastResult: text("last_result"),
     createdByAgentId: uuid("created_by_agent_id").references(() => agents.id, { onDelete: "set null" }),

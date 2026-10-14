@@ -862,6 +862,7 @@ export type {
   RoutineDescriptionDocument,
   RoutineVariable,
   RoutineVariableDefaultValue,
+  RoutineEventFilter,
   RoutineRevisionSnapshotRoutineV1,
   RoutineRevisionSnapshotTriggerV1,
   RoutineRevisionSnapshotV1,

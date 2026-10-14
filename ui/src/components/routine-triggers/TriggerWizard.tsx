@@ -8,7 +8,9 @@ import {
   GitBranch,
   Radio,
   Webhook,
+  Zap,
 } from "lucide-react";
+import { ISSUE_STATUSES, type RoutineEventFilter } from "@paperclipai/shared";
 import {
   SetupWizardNavigation,
   SetupWizardFooter,
@@ -22,7 +24,7 @@ import { AgentInstructions, CopyField } from "./WebhookFields";
 import { WebhookUrlWarning } from "./WebhookUrlWarning";
 
 export type TriggerDraft = {
-  kind: "choose" | "schedule" | "webhook";
+  kind: "choose" | "schedule" | "webhook" | "event";
   step: number;
   availableStep: number;
   sender: "custom" | "github";
@@ -32,6 +34,10 @@ export type TriggerDraft = {
   time: string;
   weekday: string;
   timezone: string;
+  /** Event trigger: one from and one to status, each an issue status or "any". */
+  eventFrom: string;
+  eventTo: string;
+  eventScope: "company" | "project";
   created: boolean;
 };
 export const defaultTriggerDraft: TriggerDraft = {
@@ -43,6 +49,9 @@ export const defaultTriggerDraft: TriggerDraft = {
   time: "09:00",
   weekday: "Monday",
   timezone: "America/Chicago",
+  eventFrom: "any",
+  eventTo: "done",
+  eventScope: "company",
   created: false,
 };
 export function webhookAgentInstructions(
@@ -98,6 +107,21 @@ export function webhookAgentInstructions(
     "Store the key securely; do not put it in source control or logs.",
   ].join("\n");
 }
+/** Filter for `POST /routines/:id/triggers` with `kind: "event"`. */
+export function eventFilterFromDraft(draft: TriggerDraft, routineProjectId: string | null): RoutineEventFilter {
+  return {
+    event: "issue.status_changed",
+    scope: { projectId: draft.eventScope === "project" ? routineProjectId : null },
+    match: { from: [draft.eventFrom], to: [draft.eventTo] },
+  };
+}
+/** One line for a card or review: "Any issue: any → done". */
+export function describeEventFilter(filter: RoutineEventFilter | null | undefined) {
+  if (!filter) return "Issue status change";
+  const list = (statuses: string[]) => statuses.map((status) => status.replace(/_/g, " ")).join(" or ");
+  const where = filter.scope.projectId ? "An issue in this project" : "Any issue";
+  return `${where}: ${list(filter.match.from)} → ${list(filter.match.to)}`;
+}
 export function describeSchedule(draft: TriggerDraft) {
   return `${draft.frequency === "daily" ? "Every day" : draft.frequency === "weekly" ? `Every ${draft.weekday}` : "Every weekday"} at ${draft.time}`;
 }
@@ -110,6 +134,7 @@ export function RoutineTriggerWizard({
   routineTitle,
   routineId,
   routineActive = true,
+  routineProjectId = null,
   webhookUrl = "",
   webhookSecret = "",
   checkResult = "waiting",
@@ -118,6 +143,7 @@ export function RoutineTriggerWizard({
   routineTitle: string;
   routineId: string;
   routineActive?: boolean;
+  routineProjectId?: string | null;
   webhookUrl?: string;
   webhookSecret?: string;
   onCreateWebhook?: (draft: TriggerDraft) => Promise<void>;
@@ -174,10 +200,14 @@ export function RoutineTriggerWizard({
     ]);
   }, [saveAndExit, setBreadcrumbs, routineTitle, routineId]);
   const schedule = draft.kind === "schedule";
+  const event = draft.kind === "event";
+  const webhook = draft.kind === "webhook";
   const github = draft.sender === "github";
   const labels = schedule
     ? ["Choose trigger", "Set schedule", "Review schedule"]
-    : ["Choose trigger", "Connect your app", "Check connection"];
+    : event
+      ? ["Choose trigger", "Pick the event"]
+      : ["Choose trigger", "Connect your app", "Check connection"];
   function patch(values: Partial<TriggerDraft>) {
     setDraft((current) => ({ ...current, ...values }));
   }
@@ -197,7 +227,9 @@ export function RoutineTriggerWizard({
   const title =
     draft.step === 0
       ? "When should this routine run?"
-      : schedule
+      : event
+        ? "Pick the event"
+        : schedule
         ? draft.step === 1
           ? "Set a schedule"
           : "Review your schedule"
@@ -207,7 +239,9 @@ export function RoutineTriggerWizard({
   const subtitle =
     draft.step === 0
       ? `Choose how to start “${routineTitle}”. You can add another trigger later.`
-      : schedule
+      : event
+        ? "Paperclip starts this routine when an issue’s status changes this way."
+        : schedule
         ? draft.step === 1
           ? "Choose when Paperclip should start this routine automatically."
           : "This schedule starts the routine automatically. You can pause or change it later."
@@ -237,7 +271,7 @@ export function RoutineTriggerWizard({
           <h1 className="text-xl font-bold">{title}</h1>
           <p className="text-sm text-muted-foreground">{subtitle}</p>
         </div>
-        {!schedule && draft.step > 0 && <WebhookUrlWarning url={webhookUrl} />}
+        {webhook && draft.step > 0 && <WebhookUrlWarning url={webhookUrl} />}
         {draft.step === 0 && (
           <fieldset className="space-y-3">
             <legend className="sr-only">Trigger type</legend>
@@ -255,6 +289,12 @@ export function RoutineTriggerWizard({
                   detail:
                     "When something happens in GitHub, another app, or a script.",
                   Icon: Webhook,
+                },
+                {
+                  kind: "event",
+                  label: "When an issue changes status",
+                  detail: "For example, when any issue goes to done.",
+                  Icon: Zap,
                 },
               ] as const
             ).map(({ kind, label, detail, Icon }) => (
@@ -433,7 +473,7 @@ export function RoutineTriggerWizard({
             Public services need a publicly reachable HTTPS webhook URL.
           </p>
         )}
-        {!schedule && draft.step === 1 && (
+        {webhook && draft.step === 1 && (
           <div className="space-y-5">
             {webhookSecret && (
               <AgentInstructions
@@ -481,7 +521,7 @@ export function RoutineTriggerWizard({
             )}
           </div>
         )}
-        {!schedule && draft.step === 2 && (
+        {webhook && draft.step === 2 && (
           <div className="space-y-5">
             <div className="space-y-1 rounded-md border border-border p-4">
               <p className="text-sm font-medium">Connection test only</p>
@@ -547,12 +587,71 @@ export function RoutineTriggerWizard({
             </details>
           </div>
         )}
-        {!schedule && draft.step === 2 && (
+        {webhook && draft.step === 2 && (
           <p className="text-xs text-muted-foreground">
             {routineActive
               ? "Finish setup to enable this webhook. Future events will start the routine; this test event won’t be replayed."
               : "Finish setup to save this webhook. The routine is paused; enable its automatic triggers when you’re ready. This test event won’t be replayed."}
           </p>
+        )}
+        {event && draft.step === 1 && (
+          <div className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="event-from">From status</Label>
+                <select
+                  id="event-from"
+                  className={selectClass}
+                  value={draft.eventFrom}
+                  onChange={(e) => patch({ eventFrom: e.target.value })}
+                >
+                  {["any", ...ISSUE_STATUSES].map((status) => (
+                    <option key={status} value={status}>
+                      {status.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="event-to">To status</Label>
+                <select
+                  id="event-to"
+                  className={selectClass}
+                  value={draft.eventTo}
+                  onChange={(e) => patch({ eventTo: e.target.value })}
+                >
+                  {["any", ...ISSUE_STATUSES].map((status) => (
+                    <option key={status} value={status}>
+                      {status.replace(/_/g, " ")}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="event-scope">Which issues</Label>
+              <select
+                id="event-scope"
+                className={selectClass}
+                value={routineProjectId ? draft.eventScope : "company"}
+                onChange={(e) => patch({ eventScope: e.target.value === "project" ? "project" : "company" })}
+              >
+                <option value="company">Any issue in this company</option>
+                {routineProjectId && <option value="project">Issues in this routine’s project</option>}
+              </select>
+            </div>
+            <div className="space-y-1 rounded-md bg-muted/40 p-4 text-sm text-muted-foreground">
+              <p>Ignores this routine’s own run issues.</p>
+              <p>
+                Events that come while a run is open join that run; when it
+                closes, one more run covers them.
+              </p>
+              <p>
+                Limit: two event routines can start each other in a loop. Paperclip
+                does not stop that.
+              </p>
+            </div>
+          </div>
         )}
         {schedule && draft.step === 2 && !routineActive && (
           <p className="text-sm text-muted-foreground">
@@ -570,6 +669,10 @@ export function RoutineTriggerWizard({
           {draft.step === 0 ? (
             <Button disabled={draft.kind === "choose"} onClick={advance}>
               Continue
+            </Button>
+          ) : event ? (
+            <Button onClick={() => void perform(() => onFinish(draft))}>
+              Add event trigger
             </Button>
           ) : schedule ? (
             draft.step === 1 ? (
