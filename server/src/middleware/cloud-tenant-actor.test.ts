@@ -2,7 +2,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Request } from "express";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
-import { authUsers, companies, companyMemberships, instanceSettings, instanceUserRoles } from "@paperclipai/db";
+import {
+  authUsers,
+  companies,
+  companyMemberships,
+  instanceSettings,
+  instanceUserRoles,
+  principalPermissionGrants,
+} from "@paperclipai/db";
 import { cloudActorHeaderSourceFromHeaders, resolveCloudTenantActor } from "./auth.js";
 
 // Minimal fake Drizzle Db: records every table passed to .insert() / .delete() and
@@ -53,10 +60,14 @@ function createFakeDb(options: {
       return chain;
     },
     select: () => {
-      if (options.selectThrows) throw new Error("select unavailable");
       return {
         from: (table: unknown) => ({
           where: (condition: unknown) => {
+            // Role-default grant seeding reads existing grants first; keep that
+            // read working so selectThrows exercises only the degradable reads.
+            if (options.selectThrows && table !== principalPermissionGrants) {
+              throw new Error("select unavailable");
+            }
             selectWheres.push({ table, condition });
             const rows =
               table === instanceSettings && settingsRow
