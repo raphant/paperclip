@@ -1,6 +1,8 @@
 import { mirrorSlackBoardComment, slackBoardReplyBindings } from "./slack-board-messages.js";
 import { externalConversationStateSql, nonIdleSlackIssueCondition, resumeSlackConversation } from "./slack-conversation-state.js";
 import { documentService } from "./documents.js";
+import { extractInlineImages, sameBodyIgnoringAttachmentIds } from "./inline-images.js";
+import { getStorageService } from "../storage/index.js";
 import { parseTaskSearch, taskSearchCtes, taskSearchScore } from "./task-search.js";
 import { createdFromIssueCondition } from "./issue-creation-origin.js";
 import { executionProjectionsForRuns } from "./execution-projection.js";
@@ -12126,12 +12128,13 @@ export function issueService(db: Db) {
         enabled: (await instanceSettings.getGeneral({ db: dbOrTx }))
           .censorUsernameInLogs,
       };
-      const redactedBody = redactCurrentUserText(body, currentUserRedactionOptions);
+      const inline = extractInlineImages(body);
+      const redactedBody = redactCurrentUserText(inline.markdown, currentUserRedactionOptions);
       if (actor.userId && options?.clientRequestId) {
         const [existing] = await dbOrTx.select().from(issueComments).where(and(eq(issueComments.issueId, issueId),
           eq(issueComments.authorUserId, actor.userId), eq(issueComments.clientRequestId, options.clientRequestId)));
         if (existing) {
-          if (existing.body !== redactedBody) throw conflict("Message request ID was already used for different content");
+          if (!sameBodyIgnoringAttachmentIds(existing.body, redactedBody)) throw conflict("Message request ID was already used for different content");
           return existing;
         }
       }
@@ -12362,6 +12365,37 @@ export function issueService(db: Db) {
               : {}),
           })
           .returning();
+        for (const image of inline.images) {
+          const stored = await getStorageService().putFile({
+            companyId: issue.companyId,
+            namespace: `issues/${issueId}`,
+            originalFilename: `pasted-image.${image.contentType.slice("image/".length)}`,
+            contentType: image.contentType,
+            body: image.body,
+          });
+          const [asset] = await dbOrTx
+            .insert(assets)
+            .values({
+              companyId: issue.companyId,
+              provider: stored.provider,
+              objectKey: stored.objectKey,
+              contentType: stored.contentType,
+              byteSize: stored.byteSize,
+              sha256: stored.sha256,
+              originalFilename: stored.originalFilename,
+              createdByAgentId: actor.agentId ?? null,
+              createdByUserId: actor.userId ?? null,
+            })
+            .returning();
+          await dbOrTx.insert(issueAttachments).values({
+            id: image.attachmentId,
+            companyId: issue.companyId,
+            issueId,
+            assetId: asset.id,
+            issueCommentId: comment!.id,
+            originatingRunId: createdByRunId,
+          });
+        }
       }
       if (!comment) throw new Error("Failed to create issue comment");
 

@@ -21,6 +21,18 @@ const object = (v: unknown): Record<string, unknown> =>
     : {};
 const string = (v: unknown) =>
   typeof v === "string" && v.length > 0 ? v : null;
+const MAX_CONTINUATION_TEXT_CHARS = 32_000;
+
+/**
+ * Cap one comment or objective so a pasted image or log cannot overflow the
+ * wake prompt; the marker names the API path that returns the whole text.
+ */
+export function capContinuationText(text: string, apiPath: string): string {
+  if (text.length <= MAX_CONTINUATION_TEXT_CHARS) return text;
+  const marker = `\n\n[Paperclip cut this text at ${MAX_CONTINUATION_TEXT_CHARS.toLocaleString("en-US")} of ${text.length.toLocaleString("en-US")} chars. Read it whole: GET ${apiPath}]`;
+  return text.slice(0, MAX_CONTINUATION_TEXT_CHARS - marker.length) + marker;
+}
+
 export function continuationOriginCommentIds(context: unknown): string[] {
   const c = object(context);
   const prior = object(c.executionContinuation);
@@ -217,7 +229,9 @@ export async function buildExecutionContinuation(input: {
         (row.authorUserId ? "user" : row.authorAgentId ? "agent" : "system"),
       authorId: row.authorUserId ?? row.authorAgentId,
       createdByRunId: row.createdByRunId,
-      body: row.deletedAt ? "" : safe.body,
+      body: row.deletedAt
+        ? ""
+        : capContinuationText(safe.body, `/api/issues/${issueId}/comments/${row.id}`),
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
       deleted: row.deletedAt !== null,
@@ -383,7 +397,8 @@ export async function buildExecutionContinuation(input: {
       sourceRunId,
     },
     originCommentIds,
-    objective: latestRequest?.body ?? issue.description ?? issue.title,
+    objective: latestRequest?.body ??
+      (issue.description != null ? capContinuationText(issue.description, `/api/issues/${issueId}`) : issue.title),
     messages,
     humanResponses: interactions.flatMap(row => {
       const response = projectHumanInteractionResponse(row);
