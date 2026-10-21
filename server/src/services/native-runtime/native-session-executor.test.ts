@@ -1056,11 +1056,11 @@ describe("remote provider pack manifest", () => {
     const payload = {
       pins: {
         nodeMinimum: "24.11.0",
-        codex: "0.156.0",
+        codex: "0.163.0",
         opencode: "1.18.32",
-        acpx: "0.13.1",
-        claudeAcp: "0.73.0",
-        codexAcp: "1.6.2",
+        acpx: "0.20.0",
+        claudeAcp: "0.94.0",
+        codexAcp: "2.2.2",
       },
       target: { platform: "linux", architecture: "x64" },
       runnerSourceRevision: "1".repeat(40),
@@ -1068,9 +1068,9 @@ describe("remote provider pack manifest", () => {
       bridgeDigest: "",
       acpxProfileDigests: {
         claude:
-          "sha256:9d73d1f0f121fb96cc8badb28c22d5bff02d8582eb2e40360a81c189e1b9422a",
+          "sha256:4a1f0fff5cdd26b8c9adb5f9b3d314640e06f876cfff97cac437159b4551ec27",
         codex:
-          "sha256:c4538599d1ab767db5dff50934f13bb5ba313a59d9c4a83e993fac4617ea63d3",
+          "sha256:a5e1dacfa8e0b02812632fab1f4590f20ffd655ae9ece916ef41813af954d900",
       },
       artifacts: {
         nodeCommand: {
@@ -2044,7 +2044,7 @@ describe("remote preinstalled executable discovery", () => {
       const shim =
         '#!/bin/sh\ncat "$(dirname "$0")/version.txt"\nprintf "%s\\n" "$@"\n';
       await writeFile(source, shim, { mode: 0o755 });
-      await writeFile(join(installation, "version.txt"), "codex-cli 0.156.0\n");
+      await writeFile(join(installation, "version.txt"), "codex-cli 0.163.0\n");
       // Existing deployments may already have the old symlink. Never write
       // through it into the shared installation while upgrading the launcher.
       await symlink(source, target);
@@ -2057,7 +2057,7 @@ describe("remote preinstalled executable discovery", () => {
           execFileSync(target, ["--version", "argument with 'quotes'"], {
             encoding: "utf8",
           }),
-        ).toBe("codex-cli 0.156.0\n--version\nargument with 'quotes'\n");
+        ).toBe("codex-cli 0.163.0\n--version\nargument with 'quotes'\n");
         expect(await readFile(source, "utf8")).toBe(shim);
       }
       expect(await readdir(join(root, "workspace", "bin"))).toEqual(["codex"]);
@@ -3935,7 +3935,7 @@ describe("stopped native conversation physical cleanup", () => {
     process.env.PAPERCLIP_RUNNER_STATE_DIR = base;
     const input = parseNativeExecutionInput({ ...execution,
       provider: provider === "codex" ? execution.provider : { kind: "acpx", agent: "claude", model: "claude-sonnet-5", permissionPolicy: "interactive",
-        profile: { driverKind: "acpx_runtime", protocolVersion: 1, acpxVersion: "0.13.1", agent: "claude", agentProfileVersion: 1,
+        profile: { driverKind: "acpx_runtime", protocolVersion: 1, acpxVersion: "0.20.0", agent: "claude", agentProfileVersion: 1,
           agentServerPackage: "@zed-industries/claude-agent-acp", agentServerVersion: "1", agentRuntimePackage: null,
           agentRuntimeVersion: null, commandDigest: "fixture" } },
       session: { ...execution.session, driverKind: provider === "codex" ? "codex_app_server" : "acpx_runtime" },
@@ -10404,7 +10404,7 @@ describe("runnerd provider runtime wiring", () => {
         }), stderr: "",
       };
       if (command.args?.[0] === "--version") return {
-        exitCode: 0, timedOut: false, stdout: "codex-cli 0.156.0", stderr: "",
+        exitCode: 0, timedOut: false, stdout: "codex-cli 0.163.0", stderr: "",
       };
       if (command.args?.[2] === "paperclip-runner-launch") {
         throw new Error("fixture_stop_after_launch_staging");
@@ -10486,10 +10486,10 @@ describe("runnerd provider runtime wiring", () => {
 
   it.each([
     ...["current", "preinstalled-exact", "preinstalled-mismatch", "preinstalled-error", "preinstalled-timeout", "stale", "missing", "retained", "retained-mismatch", "retained-error", "retained-timeout", "retained-explicit"]
-      .map((image) => ({ image, version: "0.156.0", compatible: true })),
+      .map((image) => ({ image, version: "0.163.0", compatible: true })),
     ...["0.149.0", "0.149.1", "0.153.4", "0.156.1"]
       .map((version) => ({ image: "current", version, compatible: true })),
-    ...["0.148.9", "0.157.0", "1.0.0", "0.156.0-alpha.1", "unknown"]
+    ...["0.148.9", "0.164.0", "1.0.0", "0.163.0-alpha.1", "unknown"]
       .map((version) => ({ image: "current", version, compatible: false })),
   ])("uses shared Codex and the server-owned replacement artifact (image=$image, Codex=$version)", async ({ image, version, compatible }) => {
     const retained = image.startsWith("retained");
@@ -10583,7 +10583,7 @@ describe("runnerd provider runtime wiring", () => {
       controlPlaneRegistration: (authority: unknown) => Promise<unknown>;
     };
     await expect(transport.controlPlaneRegistration({})).rejects.toThrow(
-      compatible ? "reached-preinstalled-codex-verification" : "runner_remote_provider_artifact_incompatible: supported Codex versions >=0.149.0 <0.157.0",
+      compatible ? "reached-preinstalled-codex-verification" : "runner_remote_provider_artifact_incompatible: supported Codex versions >=0.149.0 <0.164.0",
     );
     if (!compatible) {
       expect(syncIn).not.toHaveBeenCalled();
@@ -10591,7 +10591,7 @@ describe("runnerd provider runtime wiring", () => {
       expect(onLog).not.toHaveBeenCalledWith("stderr", expect.stringContaining("using compatible Codex"));
       return;
     }
-    if (version !== "0.156.0") {
+    if (version !== "0.163.0") {
       expect(onLog).toHaveBeenCalledWith("stderr", expect.stringContaining(`using compatible Codex ${version}`));
     }
     if (needsReplacement) {
@@ -10743,11 +10743,11 @@ describe("runnerd provider runtime wiring", () => {
         profile: {
           driverKind: "acpx_runtime",
           protocolVersion: 1,
-          acpxVersion: "0.13.1",
+          acpxVersion: "0.20.0",
           agent: "codex",
           agentProfileVersion: 1,
           agentServerPackage: "@agentclientprotocol/codex-acp",
-          agentServerVersion: "1.6.2",
+          agentServerVersion: "2.2.2",
           agentRuntimePackage: null,
           agentRuntimeVersion: null,
           commandDigest: "sha256:test",

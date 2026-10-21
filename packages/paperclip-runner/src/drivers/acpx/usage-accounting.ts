@@ -20,7 +20,7 @@ export function qualifiedAcpxUsageBreakdown(
   return {
     ...breakdown,
     thoughtTokens: 0,
-    // Codex ACP 1.6.2 has no cache-write billing category. Do not apply this
+    // Codex ACP 2.2.2 has no cache-write billing category. Do not apply this
     // provider-specific zero to Claude/Pi or to an explicitly invalid value.
     ...(agent === "codex" && breakdown.cachedWriteTokens === undefined
       ? { cachedWriteTokens: 0 }

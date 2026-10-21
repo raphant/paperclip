@@ -11,7 +11,7 @@ const repoRoot = fileURLToPath(new URL("../../../../..", import.meta.url));
 const fixture = path.join(repoRoot, "scripts/mcp-fixtures/servers/acp-echo-agent.mjs");
 const roots: string[] = [];
 const now = new Date("2026-07-15T20:00:00.000Z");
-// Exercise both pinned dependency patches through the same real ACP child.
+// Exercise both runtime entrypoints through the same real ACP child.
 const runnerRequire = createRequire(path.join(repoRoot, "packages/paperclip-runner/package.json"));
 const runnerAcpx = await import(runnerRequire.resolve("acpx/runtime"));
 
@@ -52,14 +52,14 @@ async function executeFailure(
 }
 
 it.each([
-  ["0.12.0", "oneshot"],
-  ["0.12.0", "persistent"],
-  ["0.13.1", "oneshot"],
-  ["0.13.1", "persistent"],
+  ["adapter-utils", "oneshot"],
+  ["adapter-utils", "persistent"],
+  ["runner", "oneshot"],
+  ["runner", "persistent"],
 ])("waits for a typed Claude quota reset with ACPX %s in %s mode without exposing provider text", async (version, mode) => {
   const title = "You've hit your session limit · resets 4:30pm (America/Chicago)";
   const { result, logs } = await executeFailure(
-    title, "limit", mode, version === "0.13.1" ? runnerAcpx.createAcpRuntime : undefined,
+    title, "limit", mode, version === "runner" ? runnerAcpx.createAcpRuntime : undefined,
   );
   expect(result).toMatchObject({
     exitCode: 1,
@@ -83,15 +83,15 @@ it("classifies quota without a reset time for the existing recovery backoff", as
 });
 
 it.each([
-  ["0.12.0", "oneshot"],
-  ["0.12.0", "persistent"],
-  ["0.13.1", "oneshot"],
-  ["0.13.1", "persistent"],
+  ["adapter-utils", "oneshot"],
+  ["adapter-utils", "persistent"],
+  ["runner", "oneshot"],
+  ["runner", "persistent"],
 ])("recognizes the Claude bridge quota fallback with ACPX %s in %s mode", async (version, mode) => {
   // @agentclientprotocol/claude-agent-acp's quota_exhausted fallback title.
   const title = "The Claude account has no available quota.";
   const { result, logs } = await executeFailure(
-    title, "limit", mode, version === "0.13.1" ? runnerAcpx.createAcpRuntime : undefined,
+    title, "limit", mode, version === "runner" ? runnerAcpx.createAcpRuntime : undefined,
   );
   expect(result).toMatchObject({
     exitCode: 1,

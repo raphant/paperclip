@@ -1,0 +1,528 @@
+diff --git a/dist/client-R5OmZ--S.d.ts b/dist/client-R5OmZ--S.d.ts
+--- a/dist/client-R5OmZ--S.d.ts
++++ b/dist/client-R5OmZ--S.d.ts
+@@ -167,6 +167,8 @@
+   private endAgentStdin;
+   private signalAgentAndDescendants;
+   private detachAgentHandles;
++  requestExtension(method: string, params: Record<string, unknown>, authority?: AcpControlAuthority): Promise<Record<string, unknown>>;
++  steerActivePrompt(text: string): Promise<void>;
+   private getConnection;
+   private log;
+   private captureStartupStderr;
+diff --git a/dist/ipc-D2BC99hf.js b/dist/ipc-D2BC99hf.js
+--- a/dist/ipc-D2BC99hf.js
++++ b/dist/ipc-D2BC99hf.js
+@@ -1320,6 +1320,7 @@
+ 		last_agent_disconnect_reason: record.lastAgentDisconnectReason,
+ 		protocol_version: record.protocolVersion,
+ 		agent_capabilities: record.agentCapabilities,
++		agent_goal_capability: record.agentGoalCapability,
+ 		title: record.title,
+ 		messages: record.messages,
+ 		updated_at: record.updated_at,
+@@ -1838,6 +1839,7 @@
+ 		lastAgentDisconnectReason: optionals.lastAgentDisconnectReason,
+ 		protocolVersion: typeof record.protocol_version === "number" ? record.protocol_version : void 0,
+ 		agentCapabilities: asRecord$2(record.agent_capabilities),
++		agentGoalCapability: asRecord$2(record.agent_goal_capability),
+ 		title: conversation.title,
+ 		messages: conversation.messages,
+ 		updated_at: conversation.updated_at,
+diff --git a/dist/queue-owner-runtime-Be8sr9L5.js b/dist/queue-owner-runtime-Be8sr9L5.js
+--- a/dist/queue-owner-runtime-Be8sr9L5.js
++++ b/dist/queue-owner-runtime-Be8sr9L5.js
+@@ -1344,9 +1344,19 @@
+ function validateAgentProcessEnv(agentProcessEnv) {
+ 	for (const [key, value] of Object.entries(agentProcessEnv ?? {})) if (typeof value !== "string" || key.includes("=") || key.includes("\0") || value.includes("\0")) throw new Error("Invalid agentProcessEnv: environment entries cannot contain NUL or names with '='");
+ }
+-function buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv) {
++function isPlainStringEnvironment(value) {
++	if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
++	const prototype = Object.getPrototypeOf(value);
++	return (prototype === Object.prototype || prototype === null) && Object.values(value).every((entry) => typeof entry === "string");
++}
++function buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv, spawnEnvironment, inheritProcessEnv) {
+ 	validateAgentProcessEnv(agentProcessEnv);
+-	const env = { ...process.env };
++	let sourceEnvironment = inheritProcessEnv === false ? {} : process.env;
++	if (spawnEnvironment !== void 0) {
++		sourceEnvironment = spawnEnvironment();
++		if (!isPlainStringEnvironment(sourceEnvironment)) throw new TypeError("ACPX spawn environment must be a plain record of string values");
++	}
++	const env = { ...sourceEnvironment };
+ 	const protectedAuthEnvKeys = promotePrefixedAuthEnvironment(env);
+ 	if (authCredentials) for (const [methodId, credential] of Object.entries(authCredentials)) {
+ 		addAuthCredentialEnvKeys(protectedAuthEnvKeys, methodId, credential);
+@@ -1396,10 +1406,10 @@
+ 	const configCredentials = authCredentials ?? {};
+ 	return configCredentials[methodId] ?? configCredentials[toEnvToken(methodId)];
+ }
+-function buildAgentSpawnOptions(cwd, authCredentials, sessionEnv, agentProcessEnv) {
++function buildAgentSpawnOptions(cwd, authCredentials, sessionEnv, agentProcessEnv, spawnEnvironment, inheritProcessEnv) {
+ 	return {
+ 		cwd,
+-		env: buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv),
++		env: buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv, spawnEnvironment, inheritProcessEnv),
+ 		stdio: [
+ 			"pipe",
+ 			"pipe",
+@@ -1478,10 +1488,13 @@
+ 			...params.elicitationModes.includes("url") ? { url: {} } : {}
+ 		} } : {}
+ 	};
+-	if (!params.devinAcp) return baseCapabilities;
++	const typedSessionFailureMeta = {
++		jetbrains: { air: { version: 1, capabilities: ["sessionFailure"] } }
++	};
++	if (!params.devinAcp) return { ...baseCapabilities, _meta: typedSessionFailureMeta };
+ 	return {
+ 		...baseCapabilities,
+-		_meta: DEVIN_COMPATIBILITY_CLIENT_CAPABILITIES_META
++		_meta: { ...typedSessionFailureMeta, ...DEVIN_COMPATIBILITY_CLIENT_CAPABILITIES_META }
+ 	};
+ }
+ //#endregion
+@@ -2670,9 +2683,21 @@
+ 			this.lastAgentExit = void 0;
+ 			this.lastKnownPid = startedProcess.pid;
+ 		}
++		if (this.options.onAgentSpawn) {
++			try {
++				if (!child.pid) throw new Error("ACPX agent spawn did not expose a valid process id.");
++				await this.options.onAgentSpawn({ pid: child.pid, startedAt: this.agentStartedAt });
++			} catch (error) {
++				try {
++					child.kill("SIGKILL");
++				} catch {}
++				throw error;
++			}
++		}
+ 		const startupStderr = [];
+ 		child.stderr.on("data", (chunk) => {
+ 			this.captureStartupStderr(startupStderr, chunk);
++			this.options.onAgentStderr?.(String(chunk));
+ 			if (!this.options.verbose) return;
+ 			process.stderr.write(chunk);
+ 		});
+@@ -2725,7 +2750,7 @@
+ 		const configuredCommand = resolveAgentCommandParts(this.options.agentCommand, this.options.agentArgv);
+ 		const resolvedBuiltInLaunch = resolveBuiltInAgentLaunch(this.options.agentCommand);
+ 		const spawnCommand = resolvedBuiltInLaunch?.command ?? configuredCommand.command;
+-		const spawnOptions = buildAgentSpawnOptions(this.options.cwd, this.options.authCredentials, this.options.sessionOptions?.env, this.options.agentProcessEnv);
++		const spawnOptions = buildAgentSpawnOptions(this.options.spawnCwd ?? this.options.cwd, this.options.authCredentials, this.options.sessionOptions?.env, this.options.agentProcessEnv, this.options.spawnEnvironment, this.options.inheritProcessEnv);
+ 		const commandContext = {
+ 			env: spawnOptions.env,
+ 			readOutput: async (command, args, timeoutMs, diagnostic = false) => {
+@@ -2805,10 +2830,10 @@
+ 		assertControlAuthority(authority);
+ 		let spawnedChild;
+ 		try {
+-			spawnedChild = spawn(launch.command, [...launch.args], {
+-				...plan.spawnOptions,
+-				windowsVerbatimArguments: prepared.windowsVerbatimArguments
+-			});
++			const options = { ...plan.spawnOptions, windowsVerbatimArguments: prepared.windowsVerbatimArguments };
++			spawnedChild = this.options.spawnAgent
++				? this.options.spawnAgent({ command: launch.command, args: [...launch.args], options })
++				: spawn(launch.command, [...launch.args], options);
+ 			await waitForSpawn(spawnedChild);
+ 		} catch (error) {
+ 			const spawnError = new AgentSpawnError(this.options.agentCommand, error);
+@@ -3172,6 +3197,20 @@
+ 		const permissionFailure = this.consumePromptPermissionFailure(sessionId);
+ 		if (permissionFailure) throw permissionFailure;
+ 	}
++	async requestExtension(method, params, authority) {
++		const connection = this.getConnection();
++		return await this.runConnectionRequest(() => connection.agent.request(method, params), authority);
++	}
++	async steerActivePrompt(text) {
++		const active = this.activePrompt;
++		if (!active) throw new Error("No running turn to steer.");
++		const response = await this.requestExtension("_session/steering", {
++			sessionId: active.sessionId,
++			prompt: [{ type: "text", text }],
++			_meta: { steering: { idleBehavior: "promptRequired" } }
++		});
++		if (response?.outcome !== "injected") throw new Error(`The agent did not take the message (${response?.outcome ?? "no answer"}${response?.reason ? `: ${response.reason}` : ""}).`);
++	}
+ 	async setSessionMode(sessionId, modeId, authority) {
+ 		const connection = this.getConnection();
+ 		await this.runConnectionRequest(() => connection.agent.request(methods.agent.session.setMode, {
+@@ -3709,6 +3748,7 @@
+ 	attachAgentLifecycleObservers(child, startedProcess, exitNotificationBarrier) {
+ 		this.attachProcessExitObserver(child, startedProcess, exitNotificationBarrier, (exitCode, signal) => {
+ 			this.handleAgentDisconnect(child, "process_exit", exitCode, signal);
++			this.options.onAgentExit?.({ pid: child.pid ?? this.lastKnownPid, exitCode, signal, exitedAt: isoNow$2() });
+ 			this.terminateAgentProcess(child);
+ 		});
+ 		child.once("close", (exitCode, signal) => {
+@@ -6659,6 +6699,27 @@
+ 		assertActive: () => assertControlAuthority(authority)
+ 	};
+ }
++const TYPED_SESSION_FAILURE_CATEGORIES = /* @__PURE__ */ new Set([
++	"connection",
++	"access",
++	"limit",
++	"service",
++	"request",
++	"unknown"
++]);
++function typedTerminalSessionFailureCategory(response) {
++	if (response === null || typeof response !== "object" || Array.isArray(response)) return null;
++	const meta = response._meta;
++	if (meta === null || typeof meta !== "object" || Array.isArray(meta)) return null;
++	const jetbrains = meta.jetbrains;
++	if (jetbrains === null || typeof jetbrains !== "object" || Array.isArray(jetbrains)) return null;
++	const air = jetbrains.air;
++	if (air === null || typeof air !== "object" || Array.isArray(air)) return null;
++	if (!Number.isInteger(air.version) || air.version < 1) return null;
++	const failure = air.sessionFailure;
++	if (failure === null || typeof failure !== "object" || Array.isArray(failure) || failure.severity !== "error") return null;
++	return typeof failure.category === "string" && TYPED_SESSION_FAILURE_CATEGORIES.has(failure.category) ? failure.category : "unknown";
++}
+ async function runPromptTurn(params) {
+ 	let settledResponse;
+ 	const lifetime = new AbortController();
+@@ -6673,6 +6734,19 @@
+ 			idleMs: SESSION_REPLY_IDLE_MS,
+ 			timeoutMs: SESSION_REPLY_DRAIN_TIMEOUT_MS
+ 		}).catch(() => {});
++		const terminalFailureCategory = typedTerminalSessionFailureCategory(response);
++		if (terminalFailureCategory !== null) {
++			// Inspect provider text only in memory, before emitting the safe category.
++			const failure = response._meta.jetbrains.air.sessionFailure;
++			try {
++				params.onTerminalSessionFailure?.({
++					category: terminalFailureCategory,
++					...(typeof failure.title === "string" ? { title: failure.title.slice(0, 4096) } : {}),
++					...(typeof failure.details === "string" ? { details: failure.details.slice(0, 4096) } : {})
++				});
++			} catch {}
++			throw new Error(`ACP agent reported a terminal ${terminalFailureCategory} failure.`);
++		}
+ 		recordPromptResponseUsage(params.conversation, response.usage, params.promptMessageId);
+ 		return {
+ 			stopReason: response.stopReason,
+diff --git a/dist/runtime.d.ts b/dist/runtime.d.ts
+--- a/dist/runtime.d.ts
++++ b/dist/runtime.d.ts
+@@ -1,8 +1,9 @@
++import { ChildProcess, SpawnOptionsWithoutStdio } from "node:child_process";
+ import { AcpAgentInspection, AcpAgentInspectionOptions, AcpAgentRegistry, AcpInspectableAgentRegistry, DEFAULT_AGENT_NAME, createAgentRegistry } from "./agent-registry.js";
+ import { C as PermissionPolicy, E as PromptInput, S as PermissionMode, T as SessionRecord, _ as AcpProcessSpawnFailure, a as AcpElicitationHandler, b as McpServer$1, c as AcpElicitationResponse, d as AcpPermissionHandler, f as AcpPermissionRequest, g as AcpProcessLifecycle, h as AcpProcessLaunchScope, i as AcpElicitationContext, l as AcpJsonRpcMessage, m as AcpProcessLaunch, n as SystemPromptOption, o as AcpElicitationMode, p as AcpProcessExit, s as AcpElicitationRequest, t as SessionAgentOptions, u as AcpPermissionDecision, v as AcpProcessStarted, x as NonInteractivePermissionPolicy, y as AuthPolicy } from "./session-options-DQlqgFv2.js";
+ import { n as AcpControlAuthority, t as AcpClient } from "./client-R5OmZ--S.js";
+ import { z } from "zod";
+-import { SetSessionConfigOptionResponse, ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
++import { SessionNotification, SetSessionConfigOptionResponse, ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
+ //#region src/acp/model-support.d.ts
+ export declare const REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE: "ACP_MODEL_UNSUPPORTED";
+ type RequestedModelUnsupportedErrorCode = typeof REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE;
+@@ -95,6 +96,7 @@
+  * A throwing assertActive rejects admission without aborting the signal.
+  */
+ type AcpRuntimeTurnInput = AcpControlAuthority & {
++  onTerminalSessionFailure?: (failure: { category: string; title?: string; details?: string }) => void;
+   handle: AcpRuntimeHandle;
+   text: string;
+   attachments?: AcpRuntimeTurnAttachment[];
+@@ -264,6 +266,10 @@
+    * Replace the displayed plan when present, including clearing it for [].
+    */
+   entries?: AcpRuntimePlanEntry[];
++} | {
++  type: "plan";
++  tag: "plan";
++  entries: AcpRuntimePlanEntry[];
+ } | {
+   type: "tool_call";
+   text: string;
+@@ -334,6 +340,8 @@
+   }): Promise<void>;
+ }
+ interface AcpRuntime {
++  steer?(input: { handle: AcpRuntimeHandle; text: string }): Promise<void>;
++  requestExtension?(input: AcpControlAuthority & { handle: AcpRuntimeHandle; method: string; params: Record<string, unknown> }): Promise<Record<string, unknown>>;
+   /** Passively replays and follows recorded turns when the backend supports a shared journal. */
+   watchSession?(input: {
+     handle: AcpRuntimeHandle;
+@@ -404,6 +412,36 @@
+ };
+ type AcpRuntimeSessionPermissions = Partial<Pick<AcpRuntimeOptions, "permissionMode" | "nonInteractivePermissions" | "permissionPolicy" | "onPermissionRequest">>;
+ type AcpRuntimeOptions = {
++  inheritProcessEnv?: boolean;
++  /** Ephemeral allowlisted environment evaluated immediately before child spawn. */
++  spawnEnvironment?: () => Record<string, string>;
++  /** Host-only spawn cwd; does not change the cwd advertised in session/new. */
++  spawnCwd?: string;
++  /** Host-owned verified executable launch. */
++  spawnAgent?: (input: {
++    command: string;
++    args: readonly string[];
++    options: SpawnOptionsWithoutStdio;
++  }) => ChildProcess;
++  onAgentSpawn?: (meta: { pid: number; startedAt: string }) => Promise<void> | void;
++  onAgentStderr?: (chunk: string) => void;
++  onAgentExit?: (meta: {
++    pid?: number;
++    exitCode: number | null;
++    signal: NodeJS.Signals | null;
++    exitedAt: string;
++  }) => void;
++  onAcpMessage?: (direction: "inbound" | "outbound", message: unknown) => void;
++  /** Ephemeral full ACP notification callback; never written to session records. */
++  onSessionNotification?: (notification: SessionNotification) => void;
++  /** Ephemeral normalized ACP client filesystem/terminal operation callback. */
++  onClientOperation?: (operation: {
++    method: string;
++    status: string;
++    summary: string;
++    details?: string;
++    timestamp: string;
++  }) => void;
+   cwd: string;
+   /** Trusted child-only environment, snapshotted at construction and never persisted. */
+   agentProcessEnv?: Record<string, string>;
+diff --git a/dist/runtime.js b/dist/runtime.js
+--- a/dist/runtime.js
++++ b/dist/runtime.js
+@@ -150,7 +150,7 @@
+ 	const raw = payload.entries;
+ 	const entries = normalizePlanEntries(raw);
+ 	if (Array.isArray(raw) && raw.length === 0) return {
+-		type: "status",
++		type: "plan",
+ 		text: "plan updated",
+ 		tag: "plan",
+ 		entries: []
+@@ -158,7 +158,7 @@
+ 	const text = planStatusText(payload) ?? (entries.length > 0 ? `plan: ${entries[0]?.content}` : null);
+ 	if (!text) return null;
+ 	return {
+-		type: "status",
++		type: "plan",
+ 		text,
+ 		tag: "plan",
+ 		...entries.length > 0 ? { entries } : {}
+@@ -502,6 +502,20 @@
+ 		availableCommands
+ 	};
+ }
++function persistedGoalCapability(goal) {
++	if (!isRecord(goal) || goal.version !== 1 || goal.controlMethod !== "_session/goal" || !Array.isArray(goal.actions)) return;
++	const actions = goal.actions.filter((action) => ["set", "pause", "resume", "clear"].includes(action));
++	if (!actions.includes("set") || !actions.includes("clear")) return;
++	return { version: 1, control_method: goal.controlMethod, actions };
++}
++function restoredGoalCapability(goal) {
++	if (!isRecord(goal)) return;
++	const canonical = persistedGoalCapability({ ...goal, controlMethod: goal.control_method ?? goal.controlMethod });
++	if (!canonical) return;
++	return { version: canonical.version, controlMethod: canonical.control_method, actions: canonical.actions };
++}
++
++
+ function normalizeUsageCost(value) {
+ 	if (!isRecord(value)) return;
+ 	const amount = asOptionalFiniteNumber(value.amount);
+@@ -1013,6 +1027,14 @@
+ 		const clientOptions = {
+ 			...options,
+ 			agentProcessEnv: this.options.agentProcessEnv,
++			spawnCwd: this.options.spawnCwd,
++			spawnEnvironment: this.options.spawnEnvironment,
++			inheritProcessEnv: this.options.inheritProcessEnv,
++			spawnAgent: this.options.spawnAgent,
++			onAgentSpawn: this.options.onAgentSpawn,
++			onAgentStderr: this.options.onAgentStderr,
++			onAgentExit: this.options.onAgentExit,
++			onAcpMessage: this.options.onAcpMessage,
+ 			processLifecycle: {
+ 				...options.processLifecycle,
+ 				onBeforeSpawn: async (launch) => {
+@@ -1120,6 +1142,7 @@
+ 			pendingSessionUpdates: []
+ 		};
+ 		input.client.setEventHandlers({
++			onAcpMessage: this.options.onAcpMessage,
+ 			onSessionUpdate: (notification) => this.routeOwnedSessionUpdate(owner, notification),
+ 			onClientOperation: (operation) => this.routeOwnedClientOperation(owner, operation)
+ 		});
+@@ -1139,6 +1162,7 @@
+ 		await this.options.sessionStore.save(record);
+ 	}
+ 	routeOwnedSessionUpdate(owner, notification) {
++		try { this.options.onSessionNotification?.(notification); } catch {}
+ 		const active = owner.activeTurn;
+ 		if (active) {
+ 			const { task, turn } = active;
+@@ -1168,6 +1192,9 @@
+ 		owner.checkpoint.request();
+ 	}
+ 	routeOwnedClientOperation(owner, operation) {
++		try {
++			this.options.onClientOperation?.(operation);
++		} catch {}
+ 		const active = owner.activeTurn;
+ 		if (!active) return;
+ 		const { task, turn } = active;
+@@ -1386,6 +1413,8 @@
+ 		record.closedAt = void 0;
+ 		record.protocolVersion = owner.client.initializeResult?.protocolVersion;
+ 		record.agentCapabilities = owner.client.initializeResult?.agentCapabilities;
++		record.agentGoalCapability = persistedGoalCapability(owner.client.initializeResult?._meta?.goal);
++		this.options.onAgentInitialize?.(owner.client.initializeResult);
+ 		applyLifecycleSnapshotToRecord(record, owner.client.getAgentLifecycleSnapshot());
+ 	}
+ 	async ensureSession(input) {
+@@ -1584,6 +1613,8 @@
+ 		this.closingActiveRecords.delete(record.acpxRecordId);
+ 		record.protocolVersion = client.initializeResult?.protocolVersion;
+ 		record.agentCapabilities = client.initializeResult?.agentCapabilities;
++		record.agentGoalCapability = persistedGoalCapability(client.initializeResult?._meta?.goal);
++		this.options.onAgentInitialize?.(client.initializeResult);
+ 		this.attachIdleProjection(owner, record);
+ 		applyConfigOptionsToRecord(record, session.sessionResult);
+ 		const modelApplication = await applyRequestedModelIfAdvertised({
+@@ -1727,6 +1758,7 @@
+ 			client: turn.client,
+ 			sessionId,
+ 			prompt: task.promptInput,
++			onTerminalSessionFailure: task.input.onTerminalSessionFailure,
+ 			timeoutMs: task.input.timeoutMs ?? this.options.timeoutMs,
+ 			conversation: turn.conversation,
+ 			promptMessageId: turn.promptMessageId,
+@@ -1875,6 +1907,11 @@
+ 		return {
+ 			hasActivePrompt: () => turn.client.hasActivePrompt(),
+ 			requestCancelActivePrompt: async () => await this.requestRuntimeTurnCancel(task, turn),
++			steerActivePrompt: async (text) => await turn.client.steerActivePrompt(text),
++			requestExtension: async (method, params, authority) => {
++				await this.waitForRuntimeControlSession(task, turn);
++				return await turn.client.requestExtension(method, params, authority);
++			},
+ 			setSessionMode: async (modeId, authority) => {
+ 				await this.waitForRuntimeControlSession(task, turn);
+ 				await turn.client.setSessionMode(turn.activeSessionId, modeId, authority);
+@@ -1990,6 +2027,8 @@
+ 		reconcileAgentSessionId(turn.record, turn.record.agentSessionId);
+ 		turn.record.protocolVersion = turn.client.initializeResult?.protocolVersion;
+ 		turn.record.agentCapabilities = turn.client.initializeResult?.agentCapabilities;
++		turn.record.agentGoalCapability = persistedGoalCapability(turn.client.initializeResult?._meta?.goal);
++		this.options.onAgentInitialize?.(turn.client.initializeResult);
+ 	}
+ 	handleRuntimeTurnFailure(task, error) {
+ 		if (!task.input.signal?.aborted || error !== task.input.signal.reason) return this.failRuntimeTurn(task, error);
+@@ -2155,6 +2194,22 @@
+ 			key,
+ 			resolve: (connectedRecord) => resolveSupportedConfigOptionId(connectedRecord, key)
+ 		} }, authority);
++	}
++	async requestExtension(input) {
++		const recordId = input.handle.acpxRecordId ?? input.handle.sessionKey;
++		return await this.withManagerLock(this.runtimeOperationLocks, recordId, async () => {
++			const record = await this.requireRecord(recordId);
++			const controller = this.activeControllers.get(record.acpxRecordId);
++			if (controller) return await controller.requestExtension(input.method, input.params, input);
++			return await this.withRuntimeControlSession(record, input.sessionMode ?? "persistent", async ({ client }) => {
++				return await client.requestExtension(input.method, input.params, input);
++			}, {}, input);
++		});
++	}
++	async steer(handle, text) {
++		const controller = this.activeControllers.get(handle.acpxRecordId ?? handle.sessionKey);
++		if (!controller?.steerActivePrompt) throw new Error("No running turn to steer.");
++		await controller.steerActivePrompt(text);
+ 	}
+ 	async cancel(handle) {
+ 		await this.activeControllers.get(handle.acpxRecordId ?? handle.sessionKey)?.requestCancelActivePrompt();
+@@ -2767,6 +2822,7 @@
+ 		const turnPromise = this.getManager().then((manager) => manager.startTurn({
+ 			handle,
+ 			text: input.text,
++			onTerminalSessionFailure: input.onTerminalSessionFailure,
+ 			attachments: input.attachments,
+ 			mode: input.mode,
+ 			sessionMode: state.mode,
+@@ -2802,6 +2858,7 @@
+ 		yield* (await this.getManager()).runTurn({
+ 			handle,
+ 			text: input.text,
++			onTerminalSessionFailure: input.onTerminalSessionFailure,
+ 			attachments: input.attachments,
+ 			mode: input.mode,
+ 			sessionMode: state.mode,
+@@ -2834,9 +2891,21 @@
+ 		const { handle, state } = this.resolveManagerHandle(input.handle);
+ 		return await (await this.getManager()).setConfigOption(handle, input.key, input.value, state.mode, input);
+ 	}
++	async requestExtension(input) {
++		const { handle, state } = this.resolveManagerHandle(input.handle);
++		return await (await this.getManager()).requestExtension({
++			...input,
++			handle,
++			sessionMode: input.sessionMode ?? state.mode
++		});
++	}
+ 	async cancel(input) {
+ 		const { handle } = this.resolveManagerHandle(input.handle);
+ 		await (await this.getManager()).cancel(handle);
++	}
++	async steer(input) {
++		const { handle } = this.resolveManagerHandle(input.handle);
++		await (await this.getManager()).steer(handle, input.text);
+ 	}
+ 	async prepareFreshSession(input) {
+ 		const { handle } = this.resolveManagerHandle(input.handle);
+diff --git a/dist/session-options-DQlqgFv2.d.ts b/dist/session-options-DQlqgFv2.d.ts
+--- a/dist/session-options-DQlqgFv2.d.ts
++++ b/dist/session-options-DQlqgFv2.d.ts
+@@ -1,4 +1,5 @@
+ import { AgentCapabilities, AnyMessage, ContentBlock, CreateElicitationRequest, ElicitationContentValue, JsonRpcId, McpServer, McpServer as McpServer$1, RequestPermissionRequest, SessionConfigOption, SessionNotification, SetSessionConfigOptionResponse, ToolKind } from "@agentclientprotocol/sdk";
++import { ChildProcess, SpawnOptionsWithoutStdio } from "node:child_process";
+ //#region src/prompt-content.d.ts
+ type PromptInput = ContentBlock[];
+ //#endregion
+@@ -141,6 +142,7 @@
+   onExit?: (exit: AcpProcessExit) => Promise<void> | void;
+ };
+ type AcpClientOptions = {
++  inheritProcessEnv?: boolean;
+   agentCommand: string;
+   agentArgv?: string[];
+   /** Trusted child-only environment overlay; never persisted as session options. */
+@@ -168,6 +170,24 @@
+     };
+     env?: Record<string, string>;
+   };
++  /** Ephemeral child environment factory; its return value is never persisted. */
++  spawnEnvironment?: () => Record<string, string>;
++  /** Host-only child cwd, separate from the cwd advertised to ACP. */
++  spawnCwd?: string;
++  /** Host-owned verified executable launch. */
++  spawnAgent?: (input: {
++    command: string;
++    args: readonly string[];
++    options: SpawnOptionsWithoutStdio;
++  }) => ChildProcess;
++  onAgentSpawn?: (meta: { pid: number; startedAt: string }) => Promise<void> | void;
++  onAgentStderr?: (chunk: string) => void;
++  onAgentExit?: (meta: {
++    pid?: number;
++    exitCode: number | null;
++    signal: NodeJS.Signals | null;
++    exitedAt: string;
++  }) => void;
+   onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
+   onAcpOutputMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
+   onSessionUpdate?: (notification: SessionNotification) => void;
+@@ -316,6 +336,7 @@
+   lastAgentDisconnectReason?: string;
+   protocolVersion?: number;
+   agentCapabilities?: AgentCapabilities;
++  agentGoalCapability?: Record<string, unknown>;
+   title?: string | null;
+   messages: SessionMessage[];
+   updated_at: string;

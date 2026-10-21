@@ -83,7 +83,7 @@ test("release selection includes every chat runtime patch and the existing ACPX 
     join(tmpdir(), "paperclip-chat-release-contract-"),
   );
   t.after(() => rmSync(destination, { recursive: true, force: true }));
-  for (const [name, version] of [...required, ["acpx", "0.13.1"]]) {
+  for (const [name, version] of [...required, ["acpx", "0.20.0"]]) {
     const directory = join(destination, "node_modules", name);
     mkdirSync(directory, { recursive: true });
     writeFileSync(
@@ -100,7 +100,7 @@ test("release selection includes every chat runtime patch and the existing ACPX 
     selected.map(({ specifier }) => specifier).sort(),
     [
       ...required.map(([name, version]) => `${name}@${version}`),
-      "acpx@0.13.1",
+      "acpx@0.20.0",
     ].sort(),
   );
   writeFileSync(

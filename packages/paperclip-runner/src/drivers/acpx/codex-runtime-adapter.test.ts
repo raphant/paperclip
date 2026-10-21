@@ -2759,11 +2759,11 @@ function openOptions(
     profile: {
       driverKind: "acpx_runtime",
       protocolVersion: 1,
-      acpxVersion: "0.13.1",
+      acpxVersion: "0.20.0",
       agent: "codex",
       agentProfileVersion: 1,
       agentServerPackage: "@agentclientprotocol/codex-acp",
-      agentServerVersion: "1.6.2",
+      agentServerVersion: "2.2.2",
       agentRuntimePackage: null,
       agentRuntimeVersion: null,
       commandDigest: "sha256:test",

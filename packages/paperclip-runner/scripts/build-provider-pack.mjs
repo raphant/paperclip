@@ -290,11 +290,11 @@ try {
   const payload = {
     pins: {
       nodeMinimum: minimumNodeVersion.join("."),
-      codex: "0.156.0",
+      codex: "0.163.0",
       opencode: "1.18.32",
-      acpx: "0.13.1",
-      claudeAcp: "0.73.0",
-      codexAcp: "1.6.2",
+      acpx: "0.20.0",
+      claudeAcp: "0.94.0",
+      codexAcp: "2.2.2",
     },
     target: { platform: process.platform, architecture: process.arch },
     runnerSourceRevision: `${revision}${dirty ? "-dirty" : ""}`,
@@ -308,9 +308,9 @@ try {
       .digest("hex")}`,
     acpxProfileDigests: {
       claude:
-        "sha256:9d73d1f0f121fb96cc8badb28c22d5bff02d8582eb2e40360a81c189e1b9422a",
+        "sha256:4a1f0fff5cdd26b8c9adb5f9b3d314640e06f876cfff97cac437159b4551ec27",
       codex:
-        "sha256:c4538599d1ab767db5dff50934f13bb5ba313a59d9c4a83e993fac4617ea63d3",
+        "sha256:a5e1dacfa8e0b02812632fab1f4590f20ffd655ae9ece916ef41813af954d900",
     },
     artifacts: {
       nodeCommand: {

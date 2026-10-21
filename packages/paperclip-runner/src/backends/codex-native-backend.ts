@@ -92,7 +92,7 @@ function transportDriverIdentity(input: NativeExecutionInput): {
       return {
         kind: "acpx_runtime",
         displayName: `${input.provider.agent === "claude" ? "Claude" : "Codex"} via ACPX`,
-        version: "0.13.1",
+        version: "0.20.0",
       };
     default:
       throw new Error(

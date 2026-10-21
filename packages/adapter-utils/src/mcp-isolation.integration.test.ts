@@ -27,7 +27,7 @@ interface McpObservation {
   tools: string[];
 }
 
-type McpServer = NonNullable<AcpRuntimeOptions["mcpServers"]>[number];
+type McpServer = Extract<NonNullable<AcpRuntimeOptions["mcpServers"]>, unknown[]>[number];
 
 afterEach(async () => {
   await Promise.all(

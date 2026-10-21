@@ -28,7 +28,7 @@ describe("ACPX driver profile", () => {
     expect(acpxDriverDescriptor("claude")).toMatchObject({
       kind: "acpx_runtime",
       displayName: "Claude via ACPX",
-      version: "0.13.1",
+      version: "0.20.0",
       protocolVersion: "acp/v1",
       runtimeContextCapabilities: {
         instructions: "native",

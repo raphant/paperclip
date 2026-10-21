@@ -41,15 +41,15 @@ const releaseScript = await readFile(new URL("./release.sh", import.meta.url), "
 const releaseLib = await readFile(new URL("./release-lib.sh", import.meta.url), "utf8");
 const buildNpmScript = await readFile(new URL("./build-npm.sh", import.meta.url), "utf8");
 const acpxRuntimePatch = await readFile(
-  new URL("../patches/acpx@0.13.1.patch", import.meta.url),
+  new URL("../patches/acpx@0.20.0.patch", import.meta.url),
   "utf8",
 );
 const claudeAcpPatch = await readFile(
-  new URL("../patches/@agentclientprotocol__claude-agent-acp@0.73.0.patch", import.meta.url),
+  new URL("../patches/@agentclientprotocol__claude-agent-acp@0.94.0.patch", import.meta.url),
   "utf8",
 );
 
-for (const version of ["0.12.0", "0.13.1"]) {
+for (const version of ["0.20.0"]) {
   test(`ACPX ${version} release patch uses portable generated unified hunks`, async () => {
     const patch = await readFile(
       new URL(`../patches/acpx@${version}.patch`, import.meta.url),
@@ -108,31 +108,28 @@ for (const version of ["0.12.0", "0.13.1"]) {
 }
 
 test("published packages preserve the patched ACPX runtime", () => {
+  assert.equal(rootPackage.pnpm.patchedDependencies["acpx@0.12.0"], undefined);
   assert.equal(
-    rootPackage.pnpm.patchedDependencies["acpx@0.12.0"],
-    "patches/acpx@0.12.0.patch",
+    rootPackage.pnpm.patchedDependencies["acpx@0.20.0"],
+    "patches/acpx@0.20.0.patch",
   );
-  assert.equal(
-    rootPackage.pnpm.patchedDependencies["acpx@0.13.1"],
-    "patches/acpx@0.13.1.patch",
-  );
-  assert.equal(adapterUtilsPackage.dependencies.acpx, "0.12.0");
+  assert.equal(adapterUtilsPackage.dependencies.acpx, "0.20.0");
   assert.deepEqual(adapterUtilsPackage.bundleDependencies, ["acpx"]);
-  assert.equal(serverPackage.dependencies.acpx, "0.13.1");
+  assert.equal(serverPackage.dependencies.acpx, "0.20.0");
   assert.ok(serverPackage.bundleDependencies.includes("acpx"));
   assert.equal(bundledCliNpmDependencies.has("acpx"), true);
   assert.equal(cliEsbuildConfig.external.includes("acpx"), false);
 });
 
 test("Paperclip Runner pins the qualified ACPX host callbacks", () => {
-  assert.equal(rootPackage.pnpm.patchedDependencies["acpx@0.13.1"], "patches/acpx@0.13.1.patch");
+  assert.equal(rootPackage.pnpm.patchedDependencies["acpx@0.20.0"], "patches/acpx@0.20.0.patch");
   assert.equal(
-    rootPackage.pnpm.patchedDependencies["@agentclientprotocol/claude-agent-acp@0.73.0"],
-    "patches/@agentclientprotocol__claude-agent-acp@0.73.0.patch",
+    rootPackage.pnpm.patchedDependencies["@agentclientprotocol/claude-agent-acp@0.94.0"],
+    "patches/@agentclientprotocol__claude-agent-acp@0.94.0.patch",
   );
-  assert.equal(runnerPackage.dependencies.acpx, "0.13.1");
-  assert.equal(runnerPackage.dependencies["@agentclientprotocol/claude-agent-acp"], "0.73.0");
-  assert.equal(runnerPackage.dependencies["@agentclientprotocol/codex-acp"], "1.6.2");
+  assert.equal(runnerPackage.dependencies.acpx, "0.20.0");
+  assert.equal(runnerPackage.dependencies["@agentclientprotocol/claude-agent-acp"], "0.94.0");
+  assert.equal(runnerPackage.dependencies["@agentclientprotocol/codex-acp"], "2.2.2");
   for (const callback of [
     "spawnEnvironment", "spawnCwd", "spawnAgent", "isPlainStringEnvironment",
     "onAgentSpawn", "onAgentStderr", "onAgentExit",
@@ -214,7 +211,7 @@ test("bundled package staging selects only the installed dependency version's pa
   assert.deepEqual(
     selectBundledDependencyPatches(destinationDir, ["acpx"], {
       "acpx@0.12.0": "patches/acpx@0.12.0.patch",
-      "acpx@0.13.1": "patches/acpx@0.13.1.patch",
+      "acpx@0.20.0": "patches/acpx@0.20.0.patch",
     }),
     [
       {
@@ -278,9 +275,9 @@ test("bundled package patch selection rejects an unpatched installed version", (
     () =>
       selectBundledDependencyPatches(destinationDir, ["acpx"], {
         "acpx@0.12.0": "patches/acpx@0.12.0.patch",
-        "acpx@0.13.1": "patches/acpx@0.13.1.patch",
+        "acpx@0.20.0": "patches/acpx@0.20.0.patch",
       }),
-    /installed acpx@0\.14\.0, but configured patches are acpx@0\.12\.0, acpx@0\.13\.1/,
+    /installed acpx@0\.14\.0, but configured patches are acpx@0\.12\.0, acpx@0\.20\.0/,
   );
 });
 
@@ -324,7 +321,7 @@ printf 'npm %s\\n' "$*" >> "$FAKE_CALL_LOG"
 node -e 'const fs = require("node:fs"); const pkg = require("./package.json"); if ("devDependencies" in pkg) process.exit(1); for (const [name, version] of Object.entries(pkg.dependencies)) { const dir = "node_modules/" + name; fs.mkdirSync(dir + "/dist", { recursive: true }); fs.writeFileSync(dir + "/package.json", JSON.stringify({ name, version })); }'
 mkdir -p node_modules/acpx/dist
 printf 'unpatched runtime\\n' > node_modules/acpx/dist/runtime.js
-printf '{"name":"acpx","version":"0.13.1"}\\n' > node_modules/acpx/package.json
+printf '{"name":"acpx","version":"0.20.0"}\\n' > node_modules/acpx/package.json
 `,
   );
   writeExecutable(
@@ -430,7 +427,7 @@ test("installed ACPX runtime persists and restores optional goal capabilities", 
   const requireRunner = createRequire(new URL("../packages/paperclip-runner/package.json", import.meta.url));
   const runtimeSource = readFileSync(requireRunner.resolve("acpx/runtime"), "utf8");
   const start = runtimeSource.indexOf("function persistedGoalCapability(");
-  const end = runtimeSource.indexOf("function planUpdateEvent(", start);
+  const end = runtimeSource.indexOf("function normalizeUsageCost(", start);
   assert.ok(start >= 0 && end > start, "the installed patch must define both goal helpers");
   const helpers = runInNewContext(runtimeSource.slice(start, end) + ";({ persistedGoalCapability, restoredGoalCapability })", {
     isRecord: (value) => value !== null && typeof value === "object" && !Array.isArray(value),

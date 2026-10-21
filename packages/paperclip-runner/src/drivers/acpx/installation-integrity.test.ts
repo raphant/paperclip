@@ -440,18 +440,23 @@ describe("ACPX installation integrity", () => {
     const dependencyFixtures = [
       {
         name: "@agentclientprotocol/sdk",
-        version: "1.4.0",
+        version: "2.0.0",
         directory: join(dependencyRoot, "agentclient-sdk"),
       },
       {
         name: "@anthropic-ai/claude-agent-sdk",
-        version: "0.3.280",
+        version: "0.3.306",
         directory: join(dependencyRoot, "claude-agent-sdk"),
       },
       {
         name: "zod",
-        version: "4.4.3",
+        version: "4.6.7",
         directory: join(dependencyRoot, "zod"),
+      },
+      {
+        name: "diff",
+        version: "9.0.0",
+        directory: join(dependencyRoot, "diff"),
       },
     ] as const;
     await Promise.all([
@@ -468,13 +473,14 @@ describe("ACPX installation integrity", () => {
         fixture.serverPackageJsonPath,
         JSON.stringify({
           name: "@agentclientprotocol/claude-agent-acp",
-          version: "0.73.0",
+          version: "0.94.0",
           type: "module",
           bin: "bin/server.js",
           dependencies: {
-            "@agentclientprotocol/sdk": "1.4.0",
-            "@anthropic-ai/claude-agent-sdk": "0.3.257",
-            zod: "^4.0.0",
+            "@agentclientprotocol/sdk": "2.0.0",
+            "@anthropic-ai/claude-agent-sdk": "0.3.303",
+            zod: "4.6.7",
+            diff: "9.0.0",
           },
         }),
       ),
@@ -539,13 +545,14 @@ describe("ACPX installation integrity", () => {
     await writeFile(
       fixture.serverPackageJsonPath,
       JSON.stringify({
-        version: "0.73.0",
+        version: "0.94.0",
         type: "module",
         bin: "bin/server.js",
         dependencies: {
-          "@agentclientprotocol/sdk": "1.4.0",
-          "@anthropic-ai/claude-agent-sdk": "0.3.257",
-          zod: "^4.0.0",
+          "@agentclientprotocol/sdk": "2.0.0",
+          "@anthropic-ai/claude-agent-sdk": "0.3.303",
+          zod: "4.6.7",
+          diff: "9.0.0",
         },
       }),
     );
@@ -1889,7 +1896,7 @@ async function expectOutput(
   const [exitCode] = await once(child, "exit");
   expect(exitCode, stderr).toBe(0);
   const normalized = process.platform === "darwin"
-    ? stdout.replace(/\/private\/var\/[^"\s]*\/paperclip-acpx-[^/]+\/0/g, "/proc/self/fd/4")
+    ? stdout.replace(/\/private\/(?:var|tmp)(?:\/[^"\s]*)?\/paperclip-acpx-[^/]+\/0/g, "/proc/self/fd/4")
     : stdout;
   expect(normalized).toBe(expected);
 }
