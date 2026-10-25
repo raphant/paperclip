@@ -31,10 +31,12 @@ import {
 } from "./helpers/embedded-postgres.js";
 import {
   initializeRunIdentity,
+  captureRunIdentity,
   reserveSteeredIdentity,
   acceptSteeredIdentity,
 } from "../services/run-identity.js";
 import { resolveGitHubOperationCredentials } from "../services/github-operation-credentials.js";
+import { recordingDb } from "./helpers/tool-gateway-listing-fixture.js";
 import {
   filterResolvedGitHubConnectionsForRun,
   resolveManagedGitHubIdentitySelection,
@@ -192,6 +194,30 @@ const support = await getEmbeddedPostgresTestSupport();
       });
       return { id, connectionId, secretId, definitionId };
     }
+    it("resolves current GitHub credentials without transferring execution snapshots", async () => {
+      const input = await seed(), selected = await grant(input, "A");
+      const payload = "github-credential-saved-input🙂".repeat(25_000);
+      await db.update(heartbeatRuns).set({ contextSnapshot: { issueId: input.issueId, prompt: payload },
+        runnerProfileJson: { nativeExecutionInput: { savedInput: payload }, savedInput: payload },
+        resultJson: { stdout: payload }, stdoutExcerpt: payload, stderrExcerpt: payload,
+      }).where(eq(heartbeatRuns.id, input.runId));
+      const [before] = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, input.runId));
+      const recorder = recordingDb(db), observed = recorder.db;
+      expect(await resolveGitHubOperationCredentials(observed, input)).toMatchObject({
+        status: "available", login: "A", grantId: selected.id,
+      });
+      const reads = recorder.statements.filter(query => query.includes('from "heartbeat_runs"'));
+      expect(reads.length).toBeGreaterThan(0);
+      expect(reads.filter(query => /"(runner_profile_json|result_json|stdout_excerpt|stderr_excerpt)"/.test(query))).toEqual([]);
+      expect((await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, input.runId)))[0]).toEqual(before);
+      const full = await captureRunIdentity(observed, input);
+      expect(full.run.runnerProfileJson).toEqual(before.runnerProfileJson);
+      expect(full.run.resultJson).toEqual(before.resultJson);
+      expect(full.run.contextSnapshot).toEqual(before.contextSnapshot);
+      await db.update(connectionGrants).set({ status: "revoked" }).where(eq(connectionGrants.id, selected.id));
+      expect(await resolveGitHubOperationCredentials(observed, input)).toMatchObject({ status: "unavailable" });
+    });
+
     async function switchTo(
       input: Awaited<ReturnType<typeof seed>>,
       user: string,
