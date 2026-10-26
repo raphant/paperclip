@@ -138,6 +138,7 @@ import { withRecoveryContext } from "./status-only-context.js";
 import { isAutomaticRecoverySuppressedByPauseHold } from "./pause-hold-guard.js";
 import {
   collectDispositionRepairSourceState,
+  dispositionRepairIssueFields,
   dispositionRepairDelayMs,
   DISPOSITION_REPAIR_MAX_ATTEMPTS,
 } from "./disposition-repair.js";
@@ -2872,10 +2873,13 @@ export function recoveryService(
       );
   }
 
-  async function healthyOpenChildIssues(issue: typeof issues.$inferSelect, sameWorkspaceOnly = false) {
+  async function healthyOpenChildIssues(
+    issue: Pick<typeof issues.$inferSelect, "id" | "companyId" | "projectWorkspaceId">,
+    sameWorkspaceOnly = false,
+  ) {
     if (sameWorkspaceOnly && !issue.projectWorkspaceId) return [];
     const childCandidates = await db
-      .select()
+      .select({ ...dispositionRepairIssueFields, identifier: issues.identifier })
       .from(issues)
       .where(
         and(
@@ -3388,7 +3392,10 @@ export function recoveryService(
 
   async function reconcileActiveRecoveryActions() {
     const rows = await db
-      .select({ action: issueRecoveryActions, issue: issues })
+      .select({
+        action: issueRecoveryActions,
+        issue: { ...dispositionRepairIssueFields, projectWorkspaceId: issues.projectWorkspaceId },
+      })
       .from(issueRecoveryActions)
       .innerJoin(
         issues,
@@ -3756,7 +3763,7 @@ export function recoveryService(
   }
 
   async function reconcileDispositionRepair(
-    issue: typeof issues.$inferSelect,
+    issue: Pick<typeof issues.$inferSelect, "id" | "companyId">,
     latestRun: LatestIssueRun,
     options: { historicalAttemptCount?: number; legacyEpisode?: LegacyDispositionEpisode } = {},
   ): Promise<"queued" | "escalated" | "covered" | "skipped"> {
