@@ -1,7 +1,7 @@
 diff --git a/dist/index.js b/dist/index.js
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -32611,7 +32611,7 @@
+@@ -38727,7 +38727,7 @@
    static permission(params, isToolApproval, correlatedCallId, nextStandaloneToolCallId) {
      if (params.mode === "form" || params.mode === "openai/form") {
        if (correlatedCallId !== void 0) {
@@ -10,16 +10,16 @@ diff --git a/dist/index.js b/dist/index.js
        }
        return {
          toolCallId: nextStandaloneToolCallId(),
-@@ -32877,7 +32877,7 @@
-   async handleElicitation(params) {
+@@ -38994,7 +38994,7 @@
+     const signal = subagentInteractionSignal(params.threadId, this.cancellationSignal);
      try {
        const context = this.createMcpElicitationContext(params);
 -      if (this.shouldUseAcpElicitation(params)) {
 +      if (!context.isToolApproval && this.shouldUseAcpElicitation(params)) {
-         const response2 = await this.connection.request(
+         const response2 = await withSubagentUserAction(params.threadId, () => this.connection.request(
            methods.client.elicitation.create,
            this.buildElicitationRequest(params, context),
-@@ -34746,6 +34746,18 @@
+@@ -41088,6 +41088,18 @@
  var SUPPORTED_GATEWAY_PROTOCOLS = {
    openai: "responses"
  };
@@ -38,34 +38,27 @@ diff --git a/dist/index.js b/dist/index.js
  var CodexAcpClient = class _CodexAcpClient {
    codexClient;
    config;
-@@ -35231,6 +35243,7 @@
-     const response = await this.resumeThread({
+@@ -41581,6 +41593,8 @@
+     const response = await this.resumeThreadWithInstructions({
        excludeTurns: true,
        config: sessionConfig.config,
 +      baseInstructions: paperclipBaseInstructions(request),
-       cwd: request.cwd,
-       modelProvider: await this.getResumeModelProvider(),
-       threadId: request.sessionId
-@@ -35270,6 +35283,7 @@
-     const response = await this.resumeThread({
-       excludeTurns: true,
-       config: sessionConfig.config,
 +      baseInstructions: paperclipBaseInstructions(request),
        cwd: request.cwd,
        modelProvider: await this.getResumeModelProvider(),
-       threadId: request.sessionId
-@@ -35334,6 +35348,7 @@
-     const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers);
+       threadId: request.sessionId,
+@@ -41717,6 +41731,7 @@
+     const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
      const response = await this.codexClient.threadStart({
        config: sessionConfig.config,
 +      baseInstructions: paperclipBaseInstructions(request),
        modelProvider: this.getModelProvider(),
        cwd: request.cwd,
        ...developerInstructions !== void 0 && { developerInstructions }
-@@ -35449,6 +35464,13 @@
+@@ -41913,6 +41928,13 @@
      });
      const mergedConfig = {
-       ...forceGitRootTurnDiffPaths(mergeGatewayConfig(this.config, this.gatewayConfig)),
+       ...disableUnsupportedSkills(forceGitRootTurnDiffPaths(mergeGatewayConfig(this.config, this.gatewayConfig))),
 +      ...(process.env.PAPERCLIP_ACPX_ISOLATED_CONTEXT === "1" ? {
 +        "include_apps_instructions": false,
 +        "features.apps": false,
@@ -76,8 +69,8 @@ diff --git a/dist/index.js b/dist/index.js
        projects: Object.fromEntries(sessionRoots.map((root) => [root, {
          trust_level: "trusted"
        }]))
-@@ -35462,7 +35484,7 @@
-       server: mcp
+@@ -41926,7 +41948,7 @@
+       server: normalizeMcpServer(mcp)
      }));
      let serversToConfigure = requestedServers;
 -    if (shouldDeduplicateMcpConflicts()) {
@@ -85,12 +78,12 @@ diff --git a/dist/index.js b/dist/index.js
        const existingNames = await this.getConfigMcpServerNames(projectPath);
        serversToConfigure = requestedServers.filter((mcp) => !existingNames.has(mcp.name));
      }
-@@ -35507,10 +35529,13 @@
+@@ -41971,10 +41993,13 @@
      if (!cwd) {
        return;
      }
--    const skillExtraRoots = additionalRoots.map((root) => path8.join(root, ".agents", "skills"));
-+    const skillExtraRoots = process.env.PAPERCLIP_ACPX_ISOLATED_CONTEXT === "1" ? [] : additionalRoots.map((root) => path8.join(root, ".agents", "skills"));
+-    const skillExtraRoots = additionalRoots.map((root) => path10.join(root, ".agents", "skills"));
++    const skillExtraRoots = process.env.PAPERCLIP_ACPX_ISOLATED_CONTEXT === "1" ? [] : additionalRoots.map((root) => path10.join(root, ".agents", "skills"));
      if (!arraysEqual(this.skillExtraRoots, skillExtraRoots)) {
        await this.codexClient.skillsExtraRootsSet({ extraRoots: skillExtraRoots });
        this.skillExtraRoots = skillExtraRoots;
@@ -100,7 +93,7 @@ diff --git a/dist/index.js b/dist/index.js
      }
    }
    /**
-@@ -35607,7 +35632,7 @@
+@@ -42078,7 +42103,7 @@
        input: input2,
        approvalPolicy: agentMode.approvalPolicy,
        approvalsReviewer: agentMode.approvalsReviewer,
@@ -109,10 +102,10 @@ diff --git a/dist/index.js b/dist/index.js
        summary: disableSummary ? "none" : "auto",
        effort,
        model: modelId.model,
-@@ -42573,6 +42598,9 @@
-               updatedGoal
-             );
-           }
+@@ -49900,6 +49925,9 @@
+         if (methodRequest.params.action === "set") {
+           const objective = methodRequest.params.objective;
+           await this.runWithProcessCheck(() => this.codexAcpClient.setGoal(sessionState.sessionId, objective));
 +          if (this.sessionPublishIsCurrent(sessionState, sessionGeneration)) {
 +            await this.publishCurrentGoal(sessionState, sessionGeneration, true);
 +          }
@@ -122,12 +115,12 @@ diff --git a/dist/index.js b/dist/index.js
 diff --git a/package.json b/package.json
 --- a/package.json
 +++ b/package.json
-@@ -68,7 +68,7 @@
+@@ -69,7 +69,7 @@
    },
    "dependencies": {
-     "@agentclientprotocol/sdk": "^1.5.0",
--    "@openai/codex": "^0.160.1",
-+    "@openai/codex": "0.163.0",
+     "@agentclientprotocol/sdk": "~2.1.0",
+-    "@openai/codex": "^0.165.0",
++    "@openai/codex": "0.166.0",
      "cross-spawn": "^7.0.6",
      "diff": "^9.0.0",
      "open": "^11.0.1",

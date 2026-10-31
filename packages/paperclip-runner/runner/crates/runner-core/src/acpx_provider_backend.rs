@@ -149,18 +149,18 @@ impl AcpxProviderDescriptor {
             "claude" => (
                 "claude-sonnet-5",
                 "@agentclientprotocol/claude-agent-acp",
-                "0.94.0",
+                "0.99.1",
                 Some("@anthropic-ai/claude-agent-sdk"),
-                Some("0.3.306"),
-                "sha256:4a1f0fff5cdd26b8c9adb5f9b3d314640e06f876cfff97cac437159b4551ec27",
+                Some("0.3.314"),
+                "sha256:dac87af861bedf6ee1444e99832274d6f517f5e83006f3905094cfc4479b3b00",
             ),
             "codex" => (
                 "gpt-5.6-sol",
                 "@agentclientprotocol/codex-acp",
-                "2.2.2",
+                "2.5.0",
                 Some("@openai/codex"),
-                Some("0.163.0"),
-                "sha256:a5e1dacfa8e0b02812632fab1f4590f20ffd655ae9ece916ef41813af954d900",
+                Some("0.166.0"),
+                "sha256:4538f039b9736675132683f556d9361b257dcbc8b373a66507d823f6a4d18d3d",
             ),
             "pi" => return Err(DurableRunnerError::invalid(
                 "ACPX agent pi is not executable through the verified runnerd provider boundary",
@@ -174,8 +174,8 @@ impl AcpxProviderDescriptor {
         if self.kind != "acpx"
             || self.provider != "acpx"
             || self.driver != "acpx_runtime"
-            || self.provider_version != "0.20.0"
-            || self.acpx_version != "0.20.0"
+            || self.provider_version != "0.21.1"
+            || self.acpx_version != "0.21.1"
             || (self.agent != "claude" && self.model != expected.0)
             || self.model.trim().is_empty()
             || self.model.len() > 1024
@@ -914,7 +914,7 @@ impl AcpxCommandExecutor {
                 "status": if resumed { "resumed" } else { "started" },
                 "provider": "acpx",
                 "driver": "acpx_runtime",
-                "providerVersion": "0.20.0",
+                "providerVersion": "0.21.1",
                 "providerSessionId": identity.acpx_record_id,
                 "sessionId": identity.agent_session_id,
                 "processId": process_id,
@@ -1850,29 +1850,29 @@ mod tests {
                 (
                     "claude-sonnet-5",
                     "@agentclientprotocol/claude-agent-acp",
-                    "0.94.0",
+                    "0.99.1",
                     json!("@anthropic-ai/claude-agent-sdk"),
-                    json!("0.3.306"),
-                    "sha256:4a1f0fff5cdd26b8c9adb5f9b3d314640e06f876cfff97cac437159b4551ec27",
+                    json!("0.3.314"),
+                    "sha256:dac87af861bedf6ee1444e99832274d6f517f5e83006f3905094cfc4479b3b00",
                 )
             } else {
                 (
                     "gpt-5.6-sol",
                     "@agentclientprotocol/codex-acp",
-                    "2.2.2",
+                    "2.5.0",
                     json!("@openai/codex"),
-                    json!("0.163.0"),
-                    "sha256:a5e1dacfa8e0b02812632fab1f4590f20ffd655ae9ece916ef41813af954d900",
+                    json!("0.166.0"),
+                    "sha256:4538f039b9736675132683f556d9361b257dcbc8b373a66507d823f6a4d18d3d",
                 )
             };
         json!({
             "kind": "acpx",
             "provider": "acpx",
             "driver": "acpx_runtime",
-            "providerVersion": "0.20.0",
+            "providerVersion": "0.21.1",
             "agent": agent,
             "model": model,
-            "acpxVersion": "0.20.0",
+            "acpxVersion": "0.21.1",
             "agentServerPackage": package,
             "agentServerVersion": version,
             "agentRuntimePackage": runtime_package,

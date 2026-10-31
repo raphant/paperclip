@@ -1,7 +1,7 @@
 diff --git a/dist/acp-agent.js b/dist/acp-agent.js
 --- a/dist/acp-agent.js
 +++ b/dist/acp-agent.js
-@@ -5007,9 +5007,19 @@
+@@ -5178,9 +5178,19 @@
                                              amount: message.total_cost_usd,
                                              currency: "USD",
                                          },
@@ -24,7 +24,7 @@ diff --git a/dist/acp-agent.js b/dist/acp-agent.js
                                      }),
                                  });
                              }
-@@ -8481,6 +8491,8 @@
+@@ -9050,6 +9060,8 @@
              // `promptSuggestions: false` keeps it off.
              promptSuggestions: true,
              ...userProvidedOptions,
@@ -33,7 +33,7 @@ diff --git a/dist/acp-agent.js b/dist/acp-agent.js
              // Claude Code uses the same checkpoint store for /rewind. Enable it only
              // for clients that negotiated per-turn file-change reports; this avoids
              // snapshot I/O for every other session.
-@@ -8492,12 +8504,24 @@
+@@ -9061,12 +9073,24 @@
              includePartialMessages: true,
              forwardSubagentText,
              mcpServers: {
