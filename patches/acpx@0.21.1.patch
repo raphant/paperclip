@@ -1,7 +1,7 @@
-diff --git a/dist/client-R5OmZ--S.d.ts b/dist/client-R5OmZ--S.d.ts
---- a/dist/client-R5OmZ--S.d.ts
-+++ b/dist/client-R5OmZ--S.d.ts
-@@ -167,6 +167,8 @@
+diff --git a/dist/client-D12zqSyN.d.ts b/dist/client-D12zqSyN.d.ts
+--- a/dist/client-D12zqSyN.d.ts
++++ b/dist/client-D12zqSyN.d.ts
+@@ -162,6 +162,8 @@
    private endAgentStdin;
    private signalAgentAndDescendants;
    private detachAgentHandles;
@@ -10,10 +10,10 @@ diff --git a/dist/client-R5OmZ--S.d.ts b/dist/client-R5OmZ--S.d.ts
    private getConnection;
    private log;
    private captureStartupStderr;
-diff --git a/dist/ipc-D2BC99hf.js b/dist/ipc-D2BC99hf.js
---- a/dist/ipc-D2BC99hf.js
-+++ b/dist/ipc-D2BC99hf.js
-@@ -1320,6 +1320,7 @@
+diff --git a/dist/ipc-BbYFsKOj.js b/dist/ipc-BbYFsKOj.js
+--- a/dist/ipc-BbYFsKOj.js
++++ b/dist/ipc-BbYFsKOj.js
+@@ -1308,6 +1308,7 @@
  		last_agent_disconnect_reason: record.lastAgentDisconnectReason,
  		protocol_version: record.protocolVersion,
  		agent_capabilities: record.agentCapabilities,
@@ -21,7 +21,7 @@ diff --git a/dist/ipc-D2BC99hf.js b/dist/ipc-D2BC99hf.js
  		title: record.title,
  		messages: record.messages,
  		updated_at: record.updated_at,
-@@ -1838,6 +1839,7 @@
+@@ -1826,6 +1827,7 @@
  		lastAgentDisconnectReason: optionals.lastAgentDisconnectReason,
  		protocolVersion: typeof record.protocol_version === "number" ? record.protocol_version : void 0,
  		agentCapabilities: asRecord$2(record.agent_capabilities),
@@ -29,23 +29,23 @@ diff --git a/dist/ipc-D2BC99hf.js b/dist/ipc-D2BC99hf.js
  		title: conversation.title,
  		messages: conversation.messages,
  		updated_at: conversation.updated_at,
-diff --git a/dist/queue-owner-runtime-Be8sr9L5.js b/dist/queue-owner-runtime-Be8sr9L5.js
---- a/dist/queue-owner-runtime-Be8sr9L5.js
-+++ b/dist/queue-owner-runtime-Be8sr9L5.js
-@@ -1344,9 +1344,19 @@
+diff --git a/dist/queue-owner-runtime-B0mPqOu4.js b/dist/queue-owner-runtime-B0mPqOu4.js
+--- a/dist/queue-owner-runtime-B0mPqOu4.js
++++ b/dist/queue-owner-runtime-B0mPqOu4.js
+@@ -1418,9 +1418,19 @@
  function validateAgentProcessEnv(agentProcessEnv) {
  	for (const [key, value] of Object.entries(agentProcessEnv ?? {})) if (typeof value !== "string" || key.includes("=") || key.includes("\0") || value.includes("\0")) throw new Error("Invalid agentProcessEnv: environment entries cannot contain NUL or names with '='");
  }
--function buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv) {
+-function buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv, inheritedEnv) {
 +function isPlainStringEnvironment(value) {
 +	if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
 +	const prototype = Object.getPrototypeOf(value);
 +	return (prototype === Object.prototype || prototype === null) && Object.values(value).every((entry) => typeof entry === "string");
 +}
-+function buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv, spawnEnvironment, inheritProcessEnv) {
++function buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv, inheritedEnv, spawnEnvironment, inheritProcessEnv) {
  	validateAgentProcessEnv(agentProcessEnv);
--	const env = { ...process.env };
-+	let sourceEnvironment = inheritProcessEnv === false ? {} : process.env;
+-	const env = inheritParentEnvironment(inheritedEnv);
++	let sourceEnvironment = inheritProcessEnv === false ? {} : inheritParentEnvironment(inheritedEnv);
 +	if (spawnEnvironment !== void 0) {
 +		sourceEnvironment = spawnEnvironment();
 +		if (!isPlainStringEnvironment(sourceEnvironment)) throw new TypeError("ACPX spawn environment must be a plain record of string values");
@@ -54,20 +54,20 @@ diff --git a/dist/queue-owner-runtime-Be8sr9L5.js b/dist/queue-owner-runtime-Be8
  	const protectedAuthEnvKeys = promotePrefixedAuthEnvironment(env);
  	if (authCredentials) for (const [methodId, credential] of Object.entries(authCredentials)) {
  		addAuthCredentialEnvKeys(protectedAuthEnvKeys, methodId, credential);
-@@ -1396,10 +1406,10 @@
+@@ -1470,10 +1480,10 @@
  	const configCredentials = authCredentials ?? {};
  	return configCredentials[methodId] ?? configCredentials[toEnvToken(methodId)];
  }
--function buildAgentSpawnOptions(cwd, authCredentials, sessionEnv, agentProcessEnv) {
-+function buildAgentSpawnOptions(cwd, authCredentials, sessionEnv, agentProcessEnv, spawnEnvironment, inheritProcessEnv) {
+-function buildAgentSpawnOptions(cwd, authCredentials, sessionEnv, agentProcessEnv, inheritedEnv) {
++function buildAgentSpawnOptions(cwd, authCredentials, sessionEnv, agentProcessEnv, inheritedEnv, spawnEnvironment, inheritProcessEnv) {
  	return {
  		cwd,
--		env: buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv),
-+		env: buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv, spawnEnvironment, inheritProcessEnv),
+-		env: buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv, inheritedEnv),
++		env: buildAgentEnvironment(authCredentials, sessionEnv, agentProcessEnv, inheritedEnv, spawnEnvironment, inheritProcessEnv),
  		stdio: [
  			"pipe",
  			"pipe",
-@@ -1478,10 +1488,13 @@
+@@ -1550,10 +1560,13 @@
  			...params.elicitationModes.includes("url") ? { url: {} } : {}
  		} } : {}
  	};
@@ -82,8 +82,8 @@ diff --git a/dist/queue-owner-runtime-Be8sr9L5.js b/dist/queue-owner-runtime-Be8
 +		_meta: { ...typedSessionFailureMeta, ...DEVIN_COMPATIBILITY_CLIENT_CAPABILITIES_META }
  	};
  }
- //#endregion
-@@ -2670,9 +2683,21 @@
+ // src/acp/command-probe.ts
+@@ -2742,9 +2755,21 @@
  			this.lastAgentExit = void 0;
  			this.lastKnownPid = startedProcess.pid;
  		}
@@ -105,16 +105,16 @@ diff --git a/dist/queue-owner-runtime-Be8sr9L5.js b/dist/queue-owner-runtime-Be8
  			if (!this.options.verbose) return;
  			process.stderr.write(chunk);
  		});
-@@ -2725,7 +2750,7 @@
+@@ -2797,7 +2822,7 @@
  		const configuredCommand = resolveAgentCommandParts(this.options.agentCommand, this.options.agentArgv);
  		const resolvedBuiltInLaunch = resolveBuiltInAgentLaunch(this.options.agentCommand);
  		const spawnCommand = resolvedBuiltInLaunch?.command ?? configuredCommand.command;
--		const spawnOptions = buildAgentSpawnOptions(this.options.cwd, this.options.authCredentials, this.options.sessionOptions?.env, this.options.agentProcessEnv);
-+		const spawnOptions = buildAgentSpawnOptions(this.options.spawnCwd ?? this.options.cwd, this.options.authCredentials, this.options.sessionOptions?.env, this.options.agentProcessEnv, this.options.spawnEnvironment, this.options.inheritProcessEnv);
+-		const spawnOptions = buildAgentSpawnOptions(this.options.cwd, this.options.authCredentials, this.options.sessionOptions?.env, this.options.agentProcessEnv, this.inheritedEnvPolicy());
++		const spawnOptions = buildAgentSpawnOptions(this.options.spawnCwd ?? this.options.cwd, this.options.authCredentials, this.options.sessionOptions?.env, this.options.agentProcessEnv, this.inheritedEnvPolicy(), this.options.spawnEnvironment, this.options.inheritProcessEnv);
  		const commandContext = {
  			env: spawnOptions.env,
  			readOutput: async (command, args, timeoutMs, diagnostic = false) => {
-@@ -2805,10 +2830,10 @@
+@@ -2877,10 +2902,10 @@
  		assertControlAuthority(authority);
  		let spawnedChild;
  		try {
@@ -129,7 +129,7 @@ diff --git a/dist/queue-owner-runtime-Be8sr9L5.js b/dist/queue-owner-runtime-Be8
  			await waitForSpawn(spawnedChild);
  		} catch (error) {
  			const spawnError = new AgentSpawnError(this.options.agentCommand, error);
-@@ -3172,6 +3197,20 @@
+@@ -3244,6 +3269,20 @@
  		const permissionFailure = this.consumePromptPermissionFailure(sessionId);
  		if (permissionFailure) throw permissionFailure;
  	}
@@ -150,7 +150,7 @@ diff --git a/dist/queue-owner-runtime-Be8sr9L5.js b/dist/queue-owner-runtime-Be8
  	async setSessionMode(sessionId, modeId, authority) {
  		const connection = this.getConnection();
  		await this.runConnectionRequest(() => connection.agent.request(methods.agent.session.setMode, {
-@@ -3709,6 +3748,7 @@
+@@ -3787,6 +3826,7 @@
  	attachAgentLifecycleObservers(child, startedProcess, exitNotificationBarrier) {
  		this.attachProcessExitObserver(child, startedProcess, exitNotificationBarrier, (exitCode, signal) => {
  			this.handleAgentDisconnect(child, "process_exit", exitCode, signal);
@@ -158,7 +158,7 @@ diff --git a/dist/queue-owner-runtime-Be8sr9L5.js b/dist/queue-owner-runtime-Be8
  			this.terminateAgentProcess(child);
  		});
  		child.once("close", (exitCode, signal) => {
-@@ -6659,6 +6699,27 @@
+@@ -6715,6 +6755,27 @@
  		assertActive: () => assertControlAuthority(authority)
  	};
  }
@@ -186,7 +186,7 @@ diff --git a/dist/queue-owner-runtime-Be8sr9L5.js b/dist/queue-owner-runtime-Be8
  async function runPromptTurn(params) {
  	let settledResponse;
  	const lifetime = new AbortController();
-@@ -6673,6 +6734,19 @@
+@@ -6729,6 +6790,19 @@
  			idleMs: SESSION_REPLY_IDLE_MS,
  			timeoutMs: SESSION_REPLY_DRAIN_TIMEOUT_MS
  		}).catch(() => {});
@@ -212,15 +212,15 @@ diff --git a/dist/runtime.d.ts b/dist/runtime.d.ts
 @@ -1,8 +1,9 @@
 +import { ChildProcess, SpawnOptionsWithoutStdio } from "node:child_process";
  import { AcpAgentInspection, AcpAgentInspectionOptions, AcpAgentRegistry, AcpInspectableAgentRegistry, DEFAULT_AGENT_NAME, createAgentRegistry } from "./agent-registry.js";
- import { C as PermissionPolicy, E as PromptInput, S as PermissionMode, T as SessionRecord, _ as AcpProcessSpawnFailure, a as AcpElicitationHandler, b as McpServer$1, c as AcpElicitationResponse, d as AcpPermissionHandler, f as AcpPermissionRequest, g as AcpProcessLifecycle, h as AcpProcessLaunchScope, i as AcpElicitationContext, l as AcpJsonRpcMessage, m as AcpProcessLaunch, n as SystemPromptOption, o as AcpElicitationMode, p as AcpProcessExit, s as AcpElicitationRequest, t as SessionAgentOptions, u as AcpPermissionDecision, v as AcpProcessStarted, x as NonInteractivePermissionPolicy, y as AuthPolicy } from "./session-options-DQlqgFv2.js";
- import { n as AcpControlAuthority, t as AcpClient } from "./client-R5OmZ--S.js";
+ import { C as PermissionPolicy, E as PromptInput, S as PermissionMode, T as SessionRecord, _ as AcpProcessSpawnFailure, a as AcpElicitationHandler, b as McpServer$1, c as AcpElicitationResponse, d as AcpPermissionHandler, f as AcpPermissionRequest, g as AcpProcessLifecycle, h as AcpProcessLaunchScope, i as AcpElicitationContext, l as AcpJsonRpcMessage, m as AcpProcessLaunch, n as SystemPromptOption, o as AcpElicitationMode, p as AcpProcessExit, s as AcpElicitationRequest, t as SessionAgentOptions, u as AcpPermissionDecision, v as AcpProcessStarted, x as NonInteractivePermissionPolicy, y as AuthPolicy } from "./session-options-BlnP3WAc.js";
+ import { n as AcpControlAuthority, t as AcpClient } from "./client-D12zqSyN.js";
  import { z } from "zod";
 -import { SetSessionConfigOptionResponse, ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
 +import { SessionNotification, SetSessionConfigOptionResponse, ToolCallContent, ToolCallLocation, ToolKind } from "@agentclientprotocol/sdk";
- //#region src/acp/model-support.d.ts
  export declare const REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE: "ACP_MODEL_UNSUPPORTED";
  type RequestedModelUnsupportedErrorCode = typeof REQUESTED_MODEL_UNSUPPORTED_ERROR_CODE;
-@@ -95,6 +96,7 @@
+ export declare const REQUESTED_MODEL_UNSUPPORTED_REASONS: readonly ["missing-capability", "unadvertised-model"];
+@@ -90,6 +91,7 @@
   * A throwing assertActive rejects admission without aborting the signal.
   */
  type AcpRuntimeTurnInput = AcpControlAuthority & {
@@ -228,7 +228,7 @@ diff --git a/dist/runtime.d.ts b/dist/runtime.d.ts
    handle: AcpRuntimeHandle;
    text: string;
    attachments?: AcpRuntimeTurnAttachment[];
-@@ -264,6 +266,10 @@
+@@ -259,6 +261,10 @@
     * Replace the displayed plan when present, including clearing it for [].
     */
    entries?: AcpRuntimePlanEntry[];
@@ -239,7 +239,7 @@ diff --git a/dist/runtime.d.ts b/dist/runtime.d.ts
  } | {
    type: "tool_call";
    text: string;
-@@ -334,6 +340,8 @@
+@@ -329,6 +335,8 @@
    }): Promise<void>;
  }
  interface AcpRuntime {
@@ -248,7 +248,7 @@ diff --git a/dist/runtime.d.ts b/dist/runtime.d.ts
    /** Passively replays and follows recorded turns when the backend supports a shared journal. */
    watchSession?(input: {
      handle: AcpRuntimeHandle;
-@@ -404,6 +412,36 @@
+@@ -399,6 +407,36 @@
  };
  type AcpRuntimeSessionPermissions = Partial<Pick<AcpRuntimeOptions, "permissionMode" | "nonInteractivePermissions" | "permissionPolicy" | "onPermissionRequest">>;
  type AcpRuntimeOptions = {
@@ -288,7 +288,7 @@ diff --git a/dist/runtime.d.ts b/dist/runtime.d.ts
 diff --git a/dist/runtime.js b/dist/runtime.js
 --- a/dist/runtime.js
 +++ b/dist/runtime.js
-@@ -150,7 +150,7 @@
+@@ -147,7 +147,7 @@
  	const raw = payload.entries;
  	const entries = normalizePlanEntries(raw);
  	if (Array.isArray(raw) && raw.length === 0) return {
@@ -297,7 +297,7 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  		text: "plan updated",
  		tag: "plan",
  		entries: []
-@@ -158,7 +158,7 @@
+@@ -155,7 +155,7 @@
  	const text = planStatusText(payload) ?? (entries.length > 0 ? `plan: ${entries[0]?.content}` : null);
  	if (!text) return null;
  	return {
@@ -306,7 +306,7 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  		text,
  		tag: "plan",
  		...entries.length > 0 ? { entries } : {}
-@@ -502,6 +502,20 @@
+@@ -499,6 +499,20 @@
  		availableCommands
  	};
  }
@@ -327,10 +327,10 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  function normalizeUsageCost(value) {
  	if (!isRecord(value)) return;
  	const amount = asOptionalFiniteNumber(value.amount);
-@@ -1013,6 +1027,14 @@
- 		const clientOptions = {
- 			...options,
+@@ -1011,6 +1025,14 @@
  			agentProcessEnv: this.options.agentProcessEnv,
+ 			agentProcessEnvAllow: this.options.agentProcessEnvAllow,
+ 			agentProcessEnvBlock: this.options.agentProcessEnvBlock,
 +			spawnCwd: this.options.spawnCwd,
 +			spawnEnvironment: this.options.spawnEnvironment,
 +			inheritProcessEnv: this.options.inheritProcessEnv,
@@ -342,7 +342,7 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  			processLifecycle: {
  				...options.processLifecycle,
  				onBeforeSpawn: async (launch) => {
-@@ -1120,6 +1142,7 @@
+@@ -1118,6 +1140,7 @@
  			pendingSessionUpdates: []
  		};
  		input.client.setEventHandlers({
@@ -350,7 +350,7 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  			onSessionUpdate: (notification) => this.routeOwnedSessionUpdate(owner, notification),
  			onClientOperation: (operation) => this.routeOwnedClientOperation(owner, operation)
  		});
-@@ -1139,6 +1162,7 @@
+@@ -1137,6 +1160,7 @@
  		await this.options.sessionStore.save(record);
  	}
  	routeOwnedSessionUpdate(owner, notification) {
@@ -358,7 +358,7 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  		const active = owner.activeTurn;
  		if (active) {
  			const { task, turn } = active;
-@@ -1168,6 +1192,9 @@
+@@ -1166,6 +1190,9 @@
  		owner.checkpoint.request();
  	}
  	routeOwnedClientOperation(owner, operation) {
@@ -368,7 +368,7 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  		const active = owner.activeTurn;
  		if (!active) return;
  		const { task, turn } = active;
-@@ -1386,6 +1413,8 @@
+@@ -1384,6 +1411,8 @@
  		record.closedAt = void 0;
  		record.protocolVersion = owner.client.initializeResult?.protocolVersion;
  		record.agentCapabilities = owner.client.initializeResult?.agentCapabilities;
@@ -377,7 +377,7 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  		applyLifecycleSnapshotToRecord(record, owner.client.getAgentLifecycleSnapshot());
  	}
  	async ensureSession(input) {
-@@ -1584,6 +1613,8 @@
+@@ -1582,6 +1611,8 @@
  		this.closingActiveRecords.delete(record.acpxRecordId);
  		record.protocolVersion = client.initializeResult?.protocolVersion;
  		record.agentCapabilities = client.initializeResult?.agentCapabilities;
@@ -386,7 +386,7 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  		this.attachIdleProjection(owner, record);
  		applyConfigOptionsToRecord(record, session.sessionResult);
  		const modelApplication = await applyRequestedModelIfAdvertised({
-@@ -1727,6 +1758,7 @@
+@@ -1725,6 +1756,7 @@
  			client: turn.client,
  			sessionId,
  			prompt: task.promptInput,
@@ -394,7 +394,7 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  			timeoutMs: task.input.timeoutMs ?? this.options.timeoutMs,
  			conversation: turn.conversation,
  			promptMessageId: turn.promptMessageId,
-@@ -1875,6 +1907,11 @@
+@@ -1873,6 +1905,11 @@
  		return {
  			hasActivePrompt: () => turn.client.hasActivePrompt(),
  			requestCancelActivePrompt: async () => await this.requestRuntimeTurnCancel(task, turn),
@@ -406,7 +406,7 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  			setSessionMode: async (modeId, authority) => {
  				await this.waitForRuntimeControlSession(task, turn);
  				await turn.client.setSessionMode(turn.activeSessionId, modeId, authority);
-@@ -1990,6 +2027,8 @@
+@@ -1988,6 +2025,8 @@
  		reconcileAgentSessionId(turn.record, turn.record.agentSessionId);
  		turn.record.protocolVersion = turn.client.initializeResult?.protocolVersion;
  		turn.record.agentCapabilities = turn.client.initializeResult?.agentCapabilities;
@@ -415,7 +415,7 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  	}
  	handleRuntimeTurnFailure(task, error) {
  		if (!task.input.signal?.aborted || error !== task.input.signal.reason) return this.failRuntimeTurn(task, error);
-@@ -2155,6 +2194,22 @@
+@@ -2153,6 +2192,22 @@
  			key,
  			resolve: (connectedRecord) => resolveSupportedConfigOptionId(connectedRecord, key)
  		} }, authority);
@@ -438,7 +438,7 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  	}
  	async cancel(handle) {
  		await this.activeControllers.get(handle.acpxRecordId ?? handle.sessionKey)?.requestCancelActivePrompt();
-@@ -2767,6 +2822,7 @@
+@@ -2765,6 +2820,7 @@
  		const turnPromise = this.getManager().then((manager) => manager.startTurn({
  			handle,
  			text: input.text,
@@ -446,7 +446,7 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  			attachments: input.attachments,
  			mode: input.mode,
  			sessionMode: state.mode,
-@@ -2802,6 +2858,7 @@
+@@ -2800,6 +2856,7 @@
  		yield* (await this.getManager()).runTurn({
  			handle,
  			text: input.text,
@@ -454,7 +454,7 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  			attachments: input.attachments,
  			mode: input.mode,
  			sessionMode: state.mode,
-@@ -2834,9 +2891,21 @@
+@@ -2832,9 +2889,21 @@
  		const { handle, state } = this.resolveManagerHandle(input.handle);
  		return await (await this.getManager()).setConfigOption(handle, input.key, input.value, state.mode, input);
  	}
@@ -476,16 +476,16 @@ diff --git a/dist/runtime.js b/dist/runtime.js
  	}
  	async prepareFreshSession(input) {
  		const { handle } = this.resolveManagerHandle(input.handle);
-diff --git a/dist/session-options-DQlqgFv2.d.ts b/dist/session-options-DQlqgFv2.d.ts
---- a/dist/session-options-DQlqgFv2.d.ts
-+++ b/dist/session-options-DQlqgFv2.d.ts
+diff --git a/dist/session-options-BlnP3WAc.d.ts b/dist/session-options-BlnP3WAc.d.ts
+--- a/dist/session-options-BlnP3WAc.d.ts
++++ b/dist/session-options-BlnP3WAc.d.ts
 @@ -1,4 +1,5 @@
  import { AgentCapabilities, AnyMessage, ContentBlock, CreateElicitationRequest, ElicitationContentValue, JsonRpcId, McpServer, McpServer as McpServer$1, RequestPermissionRequest, SessionConfigOption, SessionNotification, SetSessionConfigOptionResponse, ToolKind } from "@agentclientprotocol/sdk";
 +import { ChildProcess, SpawnOptionsWithoutStdio } from "node:child_process";
- //#region src/prompt-content.d.ts
  type PromptInput = ContentBlock[];
- //#endregion
-@@ -141,6 +142,7 @@
+ type AcpPermissionRequest = {
+   sessionId: string;
+@@ -138,6 +139,7 @@
    onExit?: (exit: AcpProcessExit) => Promise<void> | void;
  };
  type AcpClientOptions = {
@@ -493,7 +493,7 @@ diff --git a/dist/session-options-DQlqgFv2.d.ts b/dist/session-options-DQlqgFv2.
    agentCommand: string;
    agentArgv?: string[];
    /** Trusted child-only environment overlay; never persisted as session options. */
-@@ -168,6 +170,24 @@
+@@ -172,6 +174,24 @@
      };
      env?: Record<string, string>;
    };
@@ -518,7 +518,7 @@ diff --git a/dist/session-options-DQlqgFv2.d.ts b/dist/session-options-DQlqgFv2.
    onAcpMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
    onAcpOutputMessage?: (direction: AcpMessageDirection, message: AcpJsonRpcMessage) => void;
    onSessionUpdate?: (notification: SessionNotification) => void;
-@@ -316,6 +336,7 @@
+@@ -320,6 +340,7 @@
    lastAgentDisconnectReason?: string;
    protocolVersion?: number;
    agentCapabilities?: AgentCapabilities;

@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 const CODEX_ACPX_DIGEST: &str =
-    "sha256:a5e1dacfa8e0b02812632fab1f4590f20ffd655ae9ece916ef41813af954d900";
+    "sha256:4538f039b9736675132683f556d9361b257dcbc8b373a66507d823f6a4d18d3d";
 
 fn temporary_directory(label: &str) -> PathBuf {
     let nonce = SystemTime::now()
@@ -168,7 +168,7 @@ fn prepare_payload(directory: &Path, agent: &str) -> Value {
 fn prepare_payload_with_mode(directory: &Path, agent: &str, mode: &str) -> Value {
     let operations = Vec::new();
     let (runtime_package, runtime_version) = if agent == "codex" {
-        (json!("@openai/codex"), json!("0.163.0"))
+        (json!("@openai/codex"), json!("0.166.0"))
     } else {
         (Value::Null, Value::Null)
     };
@@ -183,12 +183,12 @@ fn prepare_payload_with_mode(directory: &Path, agent: &str, mode: &str) -> Value
             "kind": "acpx",
             "provider": "acpx",
             "driver": "acpx_runtime",
-            "providerVersion": "0.20.0",
+            "providerVersion": "0.21.1",
             "agent": agent,
             "model": "gpt-5.6-sol",
-            "acpxVersion": "0.20.0",
+            "acpxVersion": "0.21.1",
             "agentServerPackage": "@agentclientprotocol/codex-acp",
-            "agentServerVersion": "2.2.2",
+            "agentServerVersion": "2.5.0",
             "agentRuntimePackage": runtime_package,
             "agentRuntimeVersion": runtime_version,
             "commandDigest": CODEX_ACPX_DIGEST,
