@@ -1628,6 +1628,36 @@ describe("agent issue mutation checkout ownership", () => {
     expect(mockDocumentService.upsertIssueDocument).toHaveBeenCalled();
   });
 
+  // Fork (PAP-46): a hand-off's wake must be queued before the watchdog check reads live runs.
+  it("runs the watchdog check only after the update's wakes are admitted", async () => {
+    mockIssueService.getById.mockResolvedValue(makeIssue({ status: "backlog" }));
+    mockIssueService.update.mockImplementation(async (_id: string, patch: Record<string, unknown>) => ({
+      ...makeIssue({ status: "backlog" }),
+      ...patch,
+    }));
+    let admitWake!: () => void;
+    mockHeartbeatService.wakeup.mockImplementation(
+      () => new Promise((resolve) => { admitWake = () => resolve(undefined); }),
+    );
+
+    const pending = request(await createApp(boardActor()))
+      .patch(`/api/issues/${issueId}`)
+      .send({ status: "todo" })
+      .then((res) => res);
+
+    await vi.waitFor(() => expect(mockHeartbeatService.wakeup).toHaveBeenCalledWith(
+      ownerAgentId,
+      expect.objectContaining({ reason: "issue_status_changed" }),
+    ));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(mockTaskWatchdogService.reconcileForIssueAndAncestors).not.toHaveBeenCalled();
+
+    admitWake();
+    const res = await pending;
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(mockTaskWatchdogService.reconcileForIssueAndAncestors).toHaveBeenCalledTimes(1);
+  });
+
   it("allows agents with the active-checkout management grant to mutate active checkouts", async () => {
     mockAccessService.decide.mockImplementation(async (input: { action: string }) => ({
       allowed: input.action === "issue:mutate" || input.action === "tasks:manage_active_checkouts",

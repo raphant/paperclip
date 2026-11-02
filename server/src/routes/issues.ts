@@ -14557,7 +14557,9 @@ export function issueRoutes(
       });
 
       // Merge all wakeups from this update into one enqueue per agent to avoid duplicate runs.
-      void (async () => {
+      // Fork (PAP-46): resolves once every wake is admitted (queued or refused), so the
+      // watchdog check below sees a review hand-off's wake as live instead of a stopped leaf.
+      const wakeAdmission = (async () => {
         type WakeupRequest = NonNullable<
           Parameters<typeof heartbeat.wakeup>[1]
         >;
@@ -14985,9 +14987,11 @@ export function issueRoutes(
           }
         }
 
+        const admissions: Promise<unknown>[] = [];
         for (const { agentId, wakeup } of wakeups.values()) {
-          heartbeat
-            .wakeup(agentId, wakeup)
+          const admission = heartbeat.wakeup(agentId, wakeup);
+          admissions.push(admission.catch(() => {}));
+          admission
             .then((wakeRun) => {
               if (wakeup.reason !== ISSUE_BLOCKERS_RESOLVED_WAKE_REASON) return;
               const payload =
@@ -15029,8 +15033,13 @@ export function issueRoutes(
               ),
             );
         }
+        // Wait for admission only; the blockers-resolved activity log above stays in the background.
+        await Promise.all(admissions);
       })();
 
+      await wakeAdmission.catch((err) =>
+        logger.warn({ err, issueId: issue.id }, "failed to dispatch issue update wakes"),
+      );
       await queueTaskWatchdogEvaluation(issue, actor.runId);
       const changes = issueResponse.changes ?? {};
       if (prefersMinimalIssueUpdateResponse(req)) {
