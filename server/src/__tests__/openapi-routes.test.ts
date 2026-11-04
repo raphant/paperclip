@@ -956,3 +956,11 @@ describe("heartbeat run ID OpenAPI contract", () => {
     expect(checked).toBe(12);
   });
 });
+
+it("documents canonical saved-resource links in catalog team install responses", () => {
+  const operation = buildOpenApiSpec().paths["/api/companies/{companyId}/teams/catalog/{catalogId}/install"].post;
+  const schema = operation.responses[201].content["application/json"].schema;
+  expect(schema.required).toContain("resourceLinks");
+  expect(schema.properties.resourceLinks.items.properties.kind.enum).toEqual(["agent", "project", "routine"]);
+  expect(schema.properties.resourceLinks.items.required).toEqual(["kind", "id", "name", "href"]);
+});
