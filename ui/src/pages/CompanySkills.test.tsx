@@ -16,6 +16,7 @@ import {
   skillDetailBreadcrumbs,
 } from "./CompanySkills";
 import { skillStudioNewRoute } from "../lib/company-skill-routes";
+import { SkillDetailPage as ProductionSkillDetailPage } from "./CompanySkills.production";
 
 vi.mock("@/lib/router", () => ({
   Link: ({ children, to, ...props }: { children: ReactNode; to: string }) => (
@@ -93,7 +94,7 @@ vi.mock("../components/MarkdownBody", () => ({
 }));
 
 vi.mock("../components/MarkdownEditor", () => ({
-  MarkdownEditor: ({ value }: { value: string }) => <textarea readOnly value={value} />,
+  MarkdownEditor: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => <textarea aria-label="Skill markdown" value={value} onInput={event => onChange(event.currentTarget.value)} onChange={() => {}} />,
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -187,6 +188,7 @@ function makeDetail(currentVersion: CompanySkillVersion, overrides: Partial<Comp
 async function renderSkillDetail(
   versions: CompanySkillVersion[],
   props: Partial<ComponentProps<typeof SkillDetailPage>> = {},
+  Page: typeof SkillDetailPage = SkillDetailPage,
 ) {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -195,7 +197,7 @@ async function renderSkillDetail(
 
   await act(async () => {
     root?.render(
-      <SkillDetailPage
+      <Page
         detail={detail}
         loading={false}
         activeTab={props.activeTab ?? "versions"}
@@ -1122,5 +1124,36 @@ describe("install-time agent enablement", () => {
     await click(buttonsNamed(node, "Install update")[0] as HTMLButtonElement);
 
     expect(onConfirm).toHaveBeenCalledWith({ slug: "wireframe", force: false, agentIds: [] });
+  });
+});
+
+describe.each([["current", SkillDetailPage], ["production", ProductionSkillDetailPage]] as const)("%s file editor baseline", (_name, Page) => {
+  const frontmatter = "---\nname: demo-skill\ndescription: Keep this metadata.\ncustom: stable\n---\n\n";
+  const body = "# Demo Skill\n\nOriginal body.\n";
+  const content = frontmatter + body;
+  const file = { skillId: "skill-1", path: "SKILL.md", kind: "skill" as const, content, language: "markdown", markdown: true, editable: true };
+  const editor = (node: ParentNode) => node.querySelector<HTMLTextAreaElement>('[aria-label="Skill markdown"]')!;
+  const save = (node: ParentNode) => buttonsNamed(node, "Save")[0] as HTMLButtonElement;
+
+  it("opens frontmatter markdown clean without an editor change", async () => {
+    const node = await renderSkillDetail([makeVersion(1, content)], { activeTab: "files", file, editMode: true, draft: body }, Page);
+    expect(editor(node).value).toBe(body);
+    expect(node.textContent).not.toContain("Unsaved changes");
+    expect(save(node).disabled).toBe(true);
+  });
+
+  it("keeps a real edit dirty and discards back to the body without frontmatter", async () => {
+    const setDraft = vi.fn();
+    const setEditMode = vi.fn();
+    const node = await renderSkillDetail(
+      [makeVersion(1, content)],
+      { activeTab: "files", file, editMode: true, draft: body + "A real edit.\n", setDraft, setEditMode },
+      Page,
+    );
+    expect(node.textContent).toContain("Unsaved changes");
+    expect(save(node).disabled).toBe(false);
+    await click(buttonsNamed(node, "Discard")[0] as HTMLButtonElement);
+    expect(setDraft).toHaveBeenCalledWith(body);
+    expect(setEditMode).toHaveBeenCalledWith(false);
   });
 });
