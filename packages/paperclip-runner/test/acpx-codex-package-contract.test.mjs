@@ -28,7 +28,7 @@ const codexPatch = await readFile(
 );
 const claudePatch = await readFile(
   new URL(
-    "../../../patches/@agentclientprotocol__claude-agent-acp@0.99.1.patch",
+    "../../../patches/@agentclientprotocol__claude-agent-acp@0.101.0.patch",
     import.meta.url,
   ),
   "utf8",
@@ -57,10 +57,10 @@ const nativeSessionExecutor = await readFile(
 );
 
 test("the runner pins every qualified ACPX production dependency", () => {
-  assert.equal(runnerPackage.dependencies["@openai/codex"], "0.166.0");
+  assert.equal(runnerPackage.dependencies["@openai/codex"], "0.167.0");
   assert.equal(runnerPackage.dependencies["@anthropic-ai/claude-agent-sdk"], undefined);
   assert.equal(rootPackage.pnpm.overrides["@agentclientprotocol/codex-acp@2.5.0>@openai/codex"], runnerPackage.dependencies["@openai/codex"]);
-  assert.equal(rootPackage.pnpm.overrides["@agentclientprotocol/claude-agent-acp@0.99.1>@anthropic-ai/claude-agent-sdk"], "0.3.314");
+  assert.equal(rootPackage.pnpm.overrides["@agentclientprotocol/claude-agent-acp@0.101.0>@anthropic-ai/claude-agent-sdk"], "0.3.319");
   assert.equal(runnerPackage.optionalDependencies, undefined);
   assert.equal(runnerPackage.dependencies.node, undefined);
   assert.equal(runnerPackage.dependencies.acpx, "0.21.1");
@@ -70,7 +70,7 @@ test("the runner pins every qualified ACPX production dependency", () => {
   );
   assert.equal(
     runnerPackage.dependencies["@agentclientprotocol/claude-agent-acp"],
-    "0.99.1",
+    "0.101.0",
   );
 });
 
@@ -117,9 +117,9 @@ test("old and new pnpm configuration both apply the exact runtime patches", () =
   );
   assert.equal(
     rootPackage.pnpm.patchedDependencies[
-      "@agentclientprotocol/claude-agent-acp@0.99.1"
+      "@agentclientprotocol/claude-agent-acp@0.101.0"
     ],
-    "patches/@agentclientprotocol__claude-agent-acp@0.99.1.patch",
+    "patches/@agentclientprotocol__claude-agent-acp@0.101.0.patch",
   );
   assert.equal(
     rootPackage.pnpm.patchedDependencies[
@@ -134,7 +134,7 @@ test("old and new pnpm configuration both apply the exact runtime patches", () =
   );
   assert.match(
     workspace,
-    /claude-agent-acp@0\.99\.1["']: patches\/@agentclientprotocol__claude-agent-acp@0\.99\.1\.patch/,
+    /claude-agent-acp@0\.101\.0["']: patches\/@agentclientprotocol__claude-agent-acp@0\.101\.0\.patch/,
   );
   assert.equal(rootPackage.pnpm.patchedDependencies["node@24.11.0"], undefined);
   assert.doesNotMatch(workspace, /node@24\.11\.0:/);
@@ -142,7 +142,7 @@ test("old and new pnpm configuration both apply the exact runtime patches", () =
     providerPackBuilder,
     /copyFileSync\(process\.execPath, stableNodeCommand\)/,
   );
-  assert.match(codexPatch, /\+    "@openai\/codex": "0\.166\.0"/);
+  assert.match(codexPatch, /\+    "@openai\/codex": "0\.167\.0"/);
 });
 
 test("the ACPX patch preserves launch-only state and verified spawning", () => {

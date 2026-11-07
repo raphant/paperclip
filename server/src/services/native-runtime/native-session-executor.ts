@@ -9184,15 +9184,15 @@ const RUNNERD_BINARY_CONTRACT_VERSION = 2;
 const REMOTE_PROVIDER_PACK_SCHEMA = "paperclip-runner/remote-provider-pack/v1";
 const REMOTE_PROVIDER_PACK_PINS = {
   nodeMinimum: "24.11.0",
-  codex: "0.166.0",
+  codex: "0.167.0",
   opencode: "1.18.32",
   acpx: "0.21.1",
-  claudeAcp: "0.99.1",
+  claudeAcp: "0.101.0",
   codexAcp: "2.5.0",
 } as const;
 const REMOTE_PROVIDER_PACK_PROFILE_DIGESTS = {
   claude:
-    "sha256:dac87af861bedf6ee1444e99832274d6f517f5e83006f3905094cfc4479b3b00",
+    "sha256:a588a38be1121345a70345196476801c5a57cba5671812d51803dd2a91044cce",
   codex:
     "sha256:4538f039b9736675132683f556d9361b257dcbc8b373a66507d823f6a4d18d3d",
 } as const;

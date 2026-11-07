@@ -54,11 +54,11 @@ export const QUALIFIED_ACPX_PROFILES: Readonly<
     agent: "claude",
     agentProfileVersion: 1,
     agentServerPackage: "@agentclientprotocol/claude-agent-acp",
-    agentServerVersion: "0.99.1",
+    agentServerVersion: "0.101.0",
     agentRuntimePackage: "@anthropic-ai/claude-agent-sdk",
-    agentRuntimeVersion: "0.3.314",
+    agentRuntimeVersion: "0.3.319",
     commandDigest:
-      "sha256:dac87af861bedf6ee1444e99832274d6f517f5e83006f3905094cfc4479b3b00",
+      "sha256:a588a38be1121345a70345196476801c5a57cba5671812d51803dd2a91044cce",
     qualificationModel: "claude-sonnet-5",
     reportedModelId: "claude-sonnet-5",
     permissionPolicy: "interactive",
@@ -72,7 +72,7 @@ export const QUALIFIED_ACPX_PROFILES: Readonly<
     agentServerPackage: "@agentclientprotocol/codex-acp",
     agentServerVersion: "2.5.0",
     agentRuntimePackage: "@openai/codex",
-    agentRuntimeVersion: "0.166.0",
+    agentRuntimeVersion: "0.167.0",
     commandDigest:
       "sha256:4538f039b9736675132683f556d9361b257dcbc8b373a66507d823f6a4d18d3d",
     qualificationModel: "gpt-5.6-sol",

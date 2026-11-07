@@ -20,7 +20,7 @@ describe("provider runtime descriptor", () => {
       agentProcessId: 41002,
       acpProtocolVersion: 1,
       agentServerPackage: "@agentclientprotocol/claude-agent-acp",
-      agentServerVersion: "0.99.1",
+      agentServerVersion: "0.101.0",
       agentRuntimePackage: null,
       agentRuntimeVersion: null,
       acpxRecordId: "acpx-record-1",

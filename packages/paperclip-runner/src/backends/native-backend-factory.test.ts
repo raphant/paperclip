@@ -93,7 +93,7 @@ function acpxExecution(
               ? "pi-acp"
               : "@agentclientprotocol/claude-agent-acp",
         agentServerVersion:
-          agent === "codex" ? "2.5.0" : agent === "pi" ? "0.0.33" : "0.99.1",
+          agent === "codex" ? "2.5.0" : agent === "pi" ? "0.0.33" : "0.101.0",
         agentRuntimePackage:
           agent === "pi"
             ? "@earendil-works/pi-coding-agent"
@@ -101,13 +101,13 @@ function acpxExecution(
               ? "@openai/codex"
               : "@anthropic-ai/claude-agent-sdk",
         agentRuntimeVersion:
-          agent === "pi" ? "0.84.2" : agent === "codex" ? "0.166.0" : "0.3.314",
+          agent === "pi" ? "0.84.2" : agent === "codex" ? "0.167.0" : "0.3.319",
         commandDigest:
           agent === "codex"
             ? "sha256:4538f039b9736675132683f556d9361b257dcbc8b373a66507d823f6a4d18d3d"
             : agent === "pi"
               ? "sha256:8c696f38296d53d0061fa11534570c5ddd951b63532aed30e0f1fcc676dc169f"
-              : "sha256:dac87af861bedf6ee1444e99832274d6f517f5e83006f3905094cfc4479b3b00",
+              : "sha256:a588a38be1121345a70345196476801c5a57cba5671812d51803dd2a91044cce",
       },
     },
   };

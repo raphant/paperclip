@@ -1056,10 +1056,10 @@ describe("remote provider pack manifest", () => {
     const payload = {
       pins: {
         nodeMinimum: "24.11.0",
-        codex: "0.166.0",
+        codex: "0.167.0",
         opencode: "1.18.32",
         acpx: "0.21.1",
-        claudeAcp: "0.99.1",
+        claudeAcp: "0.101.0",
         codexAcp: "2.5.0",
       },
       target: { platform: "linux", architecture: "x64" },
@@ -1068,7 +1068,7 @@ describe("remote provider pack manifest", () => {
       bridgeDigest: "",
       acpxProfileDigests: {
         claude:
-          "sha256:dac87af861bedf6ee1444e99832274d6f517f5e83006f3905094cfc4479b3b00",
+          "sha256:a588a38be1121345a70345196476801c5a57cba5671812d51803dd2a91044cce",
         codex:
           "sha256:4538f039b9736675132683f556d9361b257dcbc8b373a66507d823f6a4d18d3d",
       },
@@ -2044,7 +2044,7 @@ describe("remote preinstalled executable discovery", () => {
       const shim =
         '#!/bin/sh\ncat "$(dirname "$0")/version.txt"\nprintf "%s\\n" "$@"\n';
       await writeFile(source, shim, { mode: 0o755 });
-      await writeFile(join(installation, "version.txt"), "codex-cli 0.166.0\n");
+      await writeFile(join(installation, "version.txt"), "codex-cli 0.167.0\n");
       // Existing deployments may already have the old symlink. Never write
       // through it into the shared installation while upgrading the launcher.
       await symlink(source, target);
@@ -2057,7 +2057,7 @@ describe("remote preinstalled executable discovery", () => {
           execFileSync(target, ["--version", "argument with 'quotes'"], {
             encoding: "utf8",
           }),
-        ).toBe("codex-cli 0.166.0\n--version\nargument with 'quotes'\n");
+        ).toBe("codex-cli 0.167.0\n--version\nargument with 'quotes'\n");
         expect(await readFile(source, "utf8")).toBe(shim);
       }
       expect(await readdir(join(root, "workspace", "bin"))).toEqual(["codex"]);
@@ -10404,7 +10404,7 @@ describe("runnerd provider runtime wiring", () => {
         }), stderr: "",
       };
       if (command.args?.[0] === "--version") return {
-        exitCode: 0, timedOut: false, stdout: "codex-cli 0.166.0", stderr: "",
+        exitCode: 0, timedOut: false, stdout: "codex-cli 0.167.0", stderr: "",
       };
       if (command.args?.[2] === "paperclip-runner-launch") {
         throw new Error("fixture_stop_after_launch_staging");
@@ -10486,10 +10486,10 @@ describe("runnerd provider runtime wiring", () => {
 
   it.each([
     ...["current", "preinstalled-exact", "preinstalled-mismatch", "preinstalled-error", "preinstalled-timeout", "stale", "missing", "retained", "retained-mismatch", "retained-error", "retained-timeout", "retained-explicit"]
-      .map((image) => ({ image, version: "0.166.0", compatible: true })),
+      .map((image) => ({ image, version: "0.167.0", compatible: true })),
     ...["0.149.0", "0.149.1", "0.153.4", "0.156.1"]
       .map((version) => ({ image: "current", version, compatible: true })),
-    ...["0.148.9", "0.167.0", "1.0.0", "0.166.0-alpha.1", "unknown"]
+    ...["0.148.9", "0.168.0", "1.0.0", "0.167.0-alpha.1", "unknown"]
       .map((version) => ({ image: "current", version, compatible: false })),
   ])("uses shared Codex and the server-owned replacement artifact (image=$image, Codex=$version)", async ({ image, version, compatible }) => {
     const retained = image.startsWith("retained");
@@ -10583,7 +10583,7 @@ describe("runnerd provider runtime wiring", () => {
       controlPlaneRegistration: (authority: unknown) => Promise<unknown>;
     };
     await expect(transport.controlPlaneRegistration({})).rejects.toThrow(
-      compatible ? "reached-preinstalled-codex-verification" : "runner_remote_provider_artifact_incompatible: supported Codex versions >=0.149.0 <0.167.0",
+      compatible ? "reached-preinstalled-codex-verification" : "runner_remote_provider_artifact_incompatible: supported Codex versions >=0.149.0 <0.168.0",
     );
     if (!compatible) {
       expect(syncIn).not.toHaveBeenCalled();
@@ -10591,7 +10591,7 @@ describe("runnerd provider runtime wiring", () => {
       expect(onLog).not.toHaveBeenCalledWith("stderr", expect.stringContaining("using compatible Codex"));
       return;
     }
-    if (version !== "0.166.0") {
+    if (version !== "0.167.0") {
       expect(onLog).toHaveBeenCalledWith("stderr", expect.stringContaining(`using compatible Codex ${version}`));
     }
     if (needsReplacement) {

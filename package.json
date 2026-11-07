@@ -113,7 +113,7 @@
       "@chat-adapter/github@4.39.0": "patches/@chat-adapter__github@4.39.0.patch",
       "@discordjs/ws@1.2.3": "patches/@discordjs__ws@1.2.3.patch",
       "postgres@3.4.9": "patches/postgres@3.4.9.patch",
-      "@agentclientprotocol/claude-agent-acp@0.99.1": "patches/@agentclientprotocol__claude-agent-acp@0.99.1.patch",
+      "@agentclientprotocol/claude-agent-acp@0.101.0": "patches/@agentclientprotocol__claude-agent-acp@0.101.0.patch",
       "@agentclientprotocol/codex-acp@2.5.0": "patches/@agentclientprotocol__codex-acp@2.5.0.patch",
       "acpx@0.21.1": "patches/acpx@0.21.1.patch"
     },
@@ -124,8 +124,8 @@
       "@codemirror/state": "^6.7.2",
       "@codemirror/view": "^6.43.11",
       "@lezer/common": "^1.5.2",
-      "@agentclientprotocol/codex-acp@2.5.0>@openai/codex": "0.166.0",
-      "@agentclientprotocol/claude-agent-acp@0.99.1>@anthropic-ai/claude-agent-sdk": "0.3.314"
+      "@agentclientprotocol/codex-acp@2.5.0>@openai/codex": "0.167.0",
+      "@agentclientprotocol/claude-agent-acp@0.101.0>@anthropic-ai/claude-agent-sdk": "0.3.319"
     }
   }
 }

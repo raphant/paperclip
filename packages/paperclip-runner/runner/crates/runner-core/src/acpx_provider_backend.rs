@@ -149,17 +149,17 @@ impl AcpxProviderDescriptor {
             "claude" => (
                 "claude-sonnet-5",
                 "@agentclientprotocol/claude-agent-acp",
-                "0.99.1",
+                "0.101.0",
                 Some("@anthropic-ai/claude-agent-sdk"),
-                Some("0.3.314"),
-                "sha256:dac87af861bedf6ee1444e99832274d6f517f5e83006f3905094cfc4479b3b00",
+                Some("0.3.319"),
+                "sha256:a588a38be1121345a70345196476801c5a57cba5671812d51803dd2a91044cce",
             ),
             "codex" => (
                 "gpt-5.6-sol",
                 "@agentclientprotocol/codex-acp",
                 "2.5.0",
                 Some("@openai/codex"),
-                Some("0.166.0"),
+                Some("0.167.0"),
                 "sha256:4538f039b9736675132683f556d9361b257dcbc8b373a66507d823f6a4d18d3d",
             ),
             "pi" => return Err(DurableRunnerError::invalid(
@@ -1850,10 +1850,10 @@ mod tests {
                 (
                     "claude-sonnet-5",
                     "@agentclientprotocol/claude-agent-acp",
-                    "0.99.1",
+                    "0.101.0",
                     json!("@anthropic-ai/claude-agent-sdk"),
-                    json!("0.3.314"),
-                    "sha256:dac87af861bedf6ee1444e99832274d6f517f5e83006f3905094cfc4479b3b00",
+                    json!("0.3.319"),
+                    "sha256:a588a38be1121345a70345196476801c5a57cba5671812d51803dd2a91044cce",
                 )
             } else {
                 (
@@ -1861,7 +1861,7 @@ mod tests {
                     "@agentclientprotocol/codex-acp",
                     "2.5.0",
                     json!("@openai/codex"),
-                    json!("0.166.0"),
+                    json!("0.167.0"),
                     "sha256:4538f039b9736675132683f556d9361b257dcbc8b373a66507d823f6a4d18d3d",
                 )
             };

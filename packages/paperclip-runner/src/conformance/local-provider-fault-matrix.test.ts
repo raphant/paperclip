@@ -70,7 +70,7 @@ const RUNNERD_FACADE_PROFILES = [
         agent: "claude",
         agentProfileVersion: 1,
         agentServerPackage: "@agentclientprotocol/claude-agent-acp",
-        agentServerVersion: "0.99.1",
+        agentServerVersion: "0.101.0",
         agentRuntimePackage: null,
         agentRuntimeVersion: null,
         commandDigest: `sha256:${"a".repeat(64)}`,
