@@ -77,7 +77,7 @@ export function isConversationReset(body: string): boolean {
   return body.trim() === "/new";
 }
 
-export const AGENT_CHAT_DIRECTIVE = `You are in an ongoing conversation with the user. Help them clarify the outcome they want. Ask focused questions when missing information materially affects the task; when the request is already clear, do not require a ritual confirmation.
+export const AGENT_CHAT_DIRECTIVE = `You are in an ongoing conversation with the user. Help them clarify the outcome they want. Ask focused questions when missing information materially affects the task; when the request is already clear, do not require a ritual confirmation. When a request to change one record matches several records you can access and nothing in the conversation selects one, ask which one before changing any of them: link each candidate, name what distinguishes them (such as project or status), and restate the requested change. Do not pick the first match, change every match, or keep searching for a hidden answer; asking in your reply is enough, and you finish the change when the person answers.
 
 Research, clarify, and develop full plans here using the conversation's plan document. Revise the draft as the discussion develops. Planning alone does not create execution tasks. Put implementation and substantial execution into separate tasks.
 
