@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
+  activityLog,
   agents,
   companies,
   createDb,
@@ -161,6 +162,65 @@ describe("P6-11..13 / P6-17 canonical event allocator", () => {
         },
       })).rejects.toBeInstanceOf(HeartbeatRunEventConflictError);
       expect(await db.select().from(heartbeatRunEvents).where(eq(heartbeatRunEvents.runId, runId))).toHaveLength(48);
+    } finally {
+      await temporary.cleanup();
+    }
+  }, 60_000);
+
+  // Carved from upstream c444da7d0 (#20670): upstream proves it with a native-runner
+  // checkpoint row, a table the fork does not have; an activity_log row references
+  // the run by foreign key the same way.
+  it("serializes appenders without blocking child foreign key checks on the run", async () => {
+    const temporary = await startEmbeddedPostgresTestDatabase("paperclip-event-lock-");
+    const db = createDb(temporary.connectionString);
+    const otherDb = createDb(temporary.connectionString);
+    const companyId = "20000000-0000-4000-8000-000000000001";
+    const agentId = "20000000-0000-4000-8000-000000000002";
+    const runId = "20000000-0000-4000-8000-000000000003";
+    try {
+      await db.insert(companies).values({ id: companyId, name: "Lock fixture", issuePrefix: "LCK" });
+      await db.insert(agents).values({ id: agentId, companyId, name: "Lock agent" });
+      await db.insert(heartbeatRuns).values({ id: runId, companyId, agentId, status: "running" });
+      const native = (ordinal: number) => ({
+        companyId, agentId, runId, eventType: "item.completed",
+        nativeSource: { sourceInstanceId: "native-writer", sourceEventId: `held-${ordinal}`,
+          sourceSeq: ordinal, protocolSchemaVersion: 1, canonicalPayload: { ordinal } },
+      });
+      let releaseHolder!: () => void;
+      const held = new Promise<void>((resolve) => { releaseHolder = resolve; });
+      let holderLocked!: () => void;
+      const locked = new Promise<void>((resolve) => { holderLocked = resolve; });
+      // An append whose transaction is still open holds the run lock.
+      const holder = otherDb.transaction(async (tx) => {
+        await appendHeartbeatRunEvent(tx as unknown as typeof db, native(1));
+        holderLocked();
+        await held;
+      });
+      await locked;
+      let secondSettled = false;
+      const second = appendHeartbeatRunEvent(db, native(2)).finally(() => { secondSettled = true; });
+      try {
+        // A child row that references the run by foreign key must not wait for the open append.
+        await db.transaction(async (tx) => {
+          await tx.execute(sql`set local lock_timeout = '2s'`);
+          await tx.insert(activityLog).values({ companyId, actorId: "fixture", action: "fixture.logged",
+            entityType: "heartbeat_run", entityId: runId, runId });
+        });
+        // Another appender still waits for the open append.
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        expect(secondSettled).toBe(false);
+      } finally {
+        releaseHolder();
+        await holder;
+      }
+      expect((await second).row.seq).toBe(2);
+      const rows = await db.select().from(heartbeatRunEvents)
+        .where(eq(heartbeatRunEvents.runId, runId)).orderBy(heartbeatRunEvents.seq);
+      expect(rows.map((row) => [row.seq, row.sourceSeq])).toEqual([[1, 1], [2, 2]]);
+      expect((await db.select({ nextEventSeq: heartbeatRuns.nextEventSeq }).from(heartbeatRuns)
+        .where(eq(heartbeatRuns.id, runId)))[0]?.nextEventSeq).toBe(3);
+      expect(await db.select({ action: activityLog.action }).from(activityLog)
+        .where(eq(activityLog.runId, runId))).toEqual([{ action: "fixture.logged" }]);
     } finally {
       await temporary.cleanup();
     }
