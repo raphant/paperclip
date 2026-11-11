@@ -968,6 +968,14 @@ describe("conversation execution wake policy", () => {
 });
 
 describe("chat prompt policy", () => {
+  it("tells chat to save a requested start order as a blocker on the waiting task, not only a promise to hold it", () => {
+    expect(AGENT_CHAT_DIRECTIVE).toContain("must not start until another task is done or approved");
+    expect(AGENT_CHAT_DIRECTIVE).toContain("add the prerequisite to the waiting task's blockedByIssueIds with PATCH /api/issues/{id}, keeping its existing blockers");
+    expect(AGENT_CHAT_DIRECTIVE).toContain("A comment or a promise to hold the work does not stop it");
+    const prompt = buildPaperclipTaskMarkdown({ issue: { id: "chat", identifier: null, title: "Chat", workMode: "ask", conversationAgentId: "agent" } });
+    expect(prompt).toContain("blockedByIssueIds with PATCH /api/issues/{id}");
+  });
+
   it("sends a task-tree pause to the person's Pause subtree control instead of imitating it with task edits", () => {
     expect(AGENT_CHAT_DIRECTIVE).toContain("Pausing, stopping or resuming a whole task tree (a parent task and all of its subtasks) is a person's control, not an agent action.");
     expect(AGENT_CHAT_DIRECTIVE).toContain("chooses More task actions, then Pause subtree");
