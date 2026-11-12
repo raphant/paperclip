@@ -1030,3 +1030,68 @@ describe("mergeHeartbeatRunResultJson", () => {
     });
   });
 });
+
+describe("resolveHeartbeatRunResponse steeredFinalText", () => {
+  const resultJson = { type: "result", subtype: "success", is_error: false, result: "The answer." };
+  const existingComment = { id: "comment-1", body: "Paused on your question." };
+
+  it("posts the steered run's final even when the run already posted a comment", () => {
+    for (const text of ["The answer.", "I'll keep the issue open until you reply."]) {
+      expect(
+        resolveHeartbeatRunResponse({ resultJson, existingComment, steeredFinalText: text }),
+      ).toMatchObject({
+        text,
+        decision: {
+          chosenSource: "adapter_final_response",
+          commentAction: "create",
+          commentId: null,
+          reasonCodes: ["steered_run_final_posted"],
+        },
+      });
+    }
+    expect(
+      resolveHeartbeatRunResponse({ resultJson, existingComment, steeredFinalText: null }),
+    ).toMatchObject({
+      text: "Paused on your question.",
+      decision: { commentAction: "reuse", commentId: "comment-1" },
+    });
+  });
+
+  it("skips structured semantic-result text", () => {
+    const structured = JSON.stringify({ schema: "paperclip.run_result.v1", reportedWorkDisposition: "done", summary: "x" });
+    for (const comment of [existingComment, null]) {
+      expect(
+        resolveHeartbeatRunResponse({ resultJson, existingComment: comment, steeredFinalText: structured }),
+      ).toEqual(resolveHeartbeatRunResponse({ resultJson, existingComment: comment }));
+    }
+  });
+
+  it("keeps today's decision on a yielded wait and for an external-chat run", () => {
+    const yielded = {
+      nativeResult: {
+        schema: "paperclip.run_result.v1",
+        reportedWorkDisposition: "yielded",
+        summary: "Waiting for Choose an output format.",
+      },
+    };
+    for (const comment of [existingComment, null]) {
+      const today = resolveHeartbeatRunResponse({ resultJson: yielded, existingComment: comment });
+      expect(
+        resolveHeartbeatRunResponse({ resultJson: yielded, existingComment: comment, steeredFinalText: "The answer." }),
+      ).toEqual(today);
+    }
+    expect(
+      resolveHeartbeatRunResponse({ resultJson: yielded, steeredFinalText: "The answer." }).decision.reasonCodes,
+    ).toEqual(["yielded_control_plane_wait"]);
+
+    const externalChat = {
+      resultJson,
+      existingComment,
+      finalAgentMessage: { text: "Chat reply", sourceEventId: "event-1", channel: "final" as const },
+      preferFinalResponseOverExistingComment: true,
+    };
+    expect(resolveHeartbeatRunResponse({ ...externalChat, steeredFinalText: "The answer." })).toEqual(
+      resolveHeartbeatRunResponse(externalChat),
+    );
+  });
+});

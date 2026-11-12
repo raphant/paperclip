@@ -381,6 +381,11 @@ export function resolveHeartbeatRunResponse(input: {
     channel: "final" | "unknown";
     reasonCode?: string;
   } | null;
+  /** The adapter's final assistant text, passed only when a steered message
+   * reached this run execution (server-owned delivery record). It is posted
+   * even when the run already posted a comment, so a steered person's answer
+   * is not dropped. Omit it to keep the default precedence. */
+  steeredFinalText?: string | null;
 }): ResolvedHeartbeatRunResponse {
   const resultJson = record(input.resultJson);
   const finalAgentText = readCommentText(input.finalAgentMessage?.text);
@@ -510,6 +515,21 @@ export function resolveHeartbeatRunResponse(input: {
       decision: decision("none", {
         commentAction: "none",
         reasonCodes: ["external_chat_final_response_unavailable"],
+      }),
+    };
+  }
+
+  const steeredFinalText = readCommentText(input.steeredFinalText);
+  if (
+    steeredFinalText &&
+    !isStructuredSemanticResultText(steeredFinalText) &&
+    !(hasYieldedSemanticResult(resultJson) && !input.conversationTurnFinished)
+  ) {
+    return {
+      text: steeredFinalText,
+      decision: decision("adapter_final_response", {
+        commentAction: "create",
+        reasonCodes: ["steered_run_final_posted"],
       }),
     };
   }

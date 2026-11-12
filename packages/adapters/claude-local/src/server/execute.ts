@@ -1278,6 +1278,9 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       costUsd: parsedStream.costUsd,
       resultJson: mergedResultJson,
       summary: parsedStream.summary || asString(parsed.result, ""),
+      ...(parsedStream.finalAssistantText
+        ? { finalAssistantText: parsedStream.finalAssistantText }
+        : {}),
       clearSession:
         clearSessionForMaxTurns ||
         // Clear-on-error: a poisoned previous_message_id is a deterministic

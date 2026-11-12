@@ -1249,6 +1249,65 @@ describe("shared ACPX engine runtime behavior", () => {
     expect(buildAcpxRunSummary({ outputSegments: ["", "  "], fallback: "end_turn" })).toBe("end_turn");
   });
 
+  describe("finalAssistantText", () => {
+    function runWithEvents(runId: string, events: () => AsyncGenerator<Record<string, unknown>>) {
+      return makeTempRoot().then((root) =>
+        createAcpxEngineExecutor({
+          createRuntime: () => ({
+            ensureSession: async () => ({
+              backendSessionId: "backend-session",
+              agentSessionId: "agent-session",
+              runtimeSessionName: "runtime-session",
+            }),
+            startTurn: () => ({
+              events: events(),
+              result: Promise.resolve({ status: "completed", stopReason: "end_turn" }),
+              cancel: async () => {},
+            }),
+            close: async () => {},
+          }) as never,
+        })({
+          runId,
+          agent: { id: "agent-1", companyId: "company-1" },
+          runtime: {},
+          config: { agent: "custom", agentCommand: "node ./fake-acp.js", stateDir: path.join(root, "state") },
+          context: {},
+          onLog: async () => {},
+          onMeta: async () => {},
+        } as never),
+      );
+    }
+
+    it("is the last non-empty output segment", async () => {
+      const result = await runWithEvents("run-final-text", async function* () {
+        yield { type: "text_delta", text: "Before the tool", stream: "output", tag: "agent_message_chunk" };
+        yield { type: "tool_call", text: "Bash", title: "Bash", status: "pending", toolCallId: "t1", tag: "tool_call" };
+        yield { type: "text_delta", text: "  The answer.  ", stream: "output", tag: "agent_message_chunk" };
+        yield { type: "done", stopReason: "end_turn" };
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.finalAssistantText).toBe("The answer.");
+    });
+
+    it("is absent with no output segments, where the summary falls back to the stop reason", async () => {
+      const result = await runWithEvents("run-final-text-empty", async function* () {
+        yield { type: "done", stopReason: "end_turn" };
+      });
+      expect(result.summary).toBe("end_turn");
+      expect(result.finalAssistantText).toBeUndefined();
+    });
+
+    it("is absent on the exception path, even after output", async () => {
+      const result = await runWithEvents("run-final-text-throw", async function* () {
+        yield { type: "text_delta", text: "Partial answer", stream: "output", tag: "agent_message_chunk" };
+        throw new Error("turn upstream boom");
+      });
+      expect(result.exitCode).toBe(1);
+      expect(result.resultJson?.phase).toBe("turn");
+      expect(result.finalAssistantText).toBeUndefined();
+    });
+  });
+
   it("coalesces placeholder-title tool updates when the adapter opts in", async () => {
     const root = await makeTempRoot();
     const stateDir = path.join(root, "state");

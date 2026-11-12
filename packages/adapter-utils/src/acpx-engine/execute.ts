@@ -3049,12 +3049,19 @@ export function buildAcpxRunSummary(input: {
   outputSegments: string[];
   fallback?: string | null;
 }): string {
-  for (let i = input.outputSegments.length - 1; i >= 0; i -= 1) {
-    const text = (input.outputSegments[i] ?? "").trim();
+  return lastAcpxOutputSegment(input.outputSegments) ?? (input.fallback ?? "").trim();
+}
+
+/**
+ * The last non-empty output segment, trimmed, or undefined when there is none.
+ * The run's `finalAssistantText`: real assistant output only, never a fallback.
+ */
+export function lastAcpxOutputSegment(outputSegments: string[]): string | undefined {
+  for (let i = outputSegments.length - 1; i >= 0; i -= 1) {
+    const text = (outputSegments[i] ?? "").trim();
     if (text) return text;
   }
-  const fallback = (input.fallback ?? "").trim();
-  return fallback;
+  return undefined;
 }
 
 // acpx substitutes a literal "tool call" title when an ACP tool_call_update
@@ -5012,6 +5019,7 @@ export function createAcpxEngineExecutor(deps: AcpxEngineExecutorOptions = {}) {
         // path keeps it set, so the run root span closes with error status. A
         // completed terminal with a lost duplex channel keeps the flag set.
         runFailed = turnSucceeded ? false : true;
+        const finalAssistantText = lastAcpxOutputSegment(outputSegments);
         capturedResult = {
           exitCode: turnSucceeded ? 0 : 1,
           signal: timedOut ? "SIGTERM" : null,
@@ -5060,6 +5068,7 @@ export function createAcpxEngineExecutor(deps: AcpxEngineExecutorOptions = {}) {
             outputSegments,
             fallback: terminalStopReason || terminal.status,
           }),
+          ...(finalAssistantText ? { finalAssistantText } : {}),
           clearSession,
         };
         // The turn phase finished. A completed, non-timed-out turn with a live

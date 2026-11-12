@@ -567,3 +567,49 @@ describe("parseClaudeStreamJson usage extraction", () => {
     expect(parsed.usageBasis).toBe("per_run");
   });
 });
+
+describe("parseClaudeStreamJson finalAssistantText", () => {
+  const lines = (...events: Record<string, unknown>[]) => events.map((e) => JSON.stringify(e)).join("\n");
+  const assistant = (text: string) => ({
+    type: "assistant",
+    session_id: "s",
+    message: { content: [{ type: "text", text }] },
+  });
+
+  it("is the last success result's own result string", () => {
+    const parsed = parseClaudeStreamJson(
+      lines(
+        assistant("first"),
+        { type: "result", subtype: "error_during_execution", is_error: true, result: "boom" },
+        assistant("second"),
+        { type: "result", subtype: "success", is_error: false, result: "The answer." },
+      ),
+    );
+    expect(parsed.finalAssistantText).toBe("The answer.");
+  });
+
+  it("is absent when the last result is an error, including a success with is_error", () => {
+    expect(
+      parseClaudeStreamJson(
+        lines(
+          { type: "result", subtype: "success", is_error: false, result: "earlier" },
+          { type: "result", subtype: "error_during_execution", is_error: true, result: "boom" },
+        ),
+      ).finalAssistantText,
+    ).toBeUndefined();
+    expect(
+      parseClaudeStreamJson(
+        lines({ type: "result", subtype: "success", is_error: true, result: "Failed to authenticate." }),
+      ).finalAssistantText,
+    ).toBeUndefined();
+  });
+
+  it("is absent when the last result has no result string, with no assistant-text fallback", () => {
+    const parsed = parseClaudeStreamJson(
+      lines(assistant("assistant text only"), { type: "result", subtype: "success", is_error: false }),
+    );
+    expect(parsed.summary).toBe("assistant text only");
+    expect(parsed.finalAssistantText).toBeUndefined();
+    expect(parseClaudeStreamJson(lines(assistant("no result event"))).finalAssistantText).toBeUndefined();
+  });
+});

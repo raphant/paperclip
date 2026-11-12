@@ -102,6 +102,7 @@ export function parseClaudeStreamJson(stdout: string) {
       usage: null as UsageSummary | null,
       usageBasis: null as "per_run" | null,
       summary: assistantTexts.join("\n\n").trim(),
+      finalAssistantText: undefined as string | undefined,
       resultJson: null as Record<string, unknown> | null,
     };
   }
@@ -116,6 +117,16 @@ export function parseClaudeStreamJson(stdout: string) {
   const costRaw = finalResult.total_cost_usd;
   const costUsd = typeof costRaw === "number" && Number.isFinite(costRaw) ? costRaw : null;
   const summary = asString(finalResult.result, assistantTexts.join("\n\n")).trim();
+  // Only the last result's own text, and only a clean success: never the
+  // assistant-text fallback above, never an error (a `success` result can still
+  // carry `is_error`).
+  const finalAssistantText =
+    asString(finalResult.subtype, "") === "success" &&
+    finalResult.is_error !== true &&
+    typeof finalResult.result === "string" &&
+    finalResult.result.trim()
+      ? finalResult.result
+      : undefined;
 
   return {
     sessionId,
@@ -126,6 +137,7 @@ export function parseClaudeStreamJson(stdout: string) {
     // keep the server from applying its session-cumulative delta heuristic.
     usageBasis: "per_run" as const,
     summary,
+    finalAssistantText,
     resultJson: finalResult,
   };
 }

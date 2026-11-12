@@ -616,7 +616,10 @@ import {
   type EffectiveRunConfigSecretManifestEntry,
 } from "./effective-run-config-fingerprints.js";
 import type { PluginWorkerManager } from "./plugin-worker-manager.js";
-import { setLegacyRunSteering } from "./legacy-run-steering.js";
+import {
+  setLegacyRunSteering,
+  type LegacyRunSteerDelivery,
+} from "./legacy-run-steering.js";
 import { serverVersion } from "../version.js";
 
 const MAX_LIVE_LOG_CHUNK_BYTES = 8 * 1024;
@@ -24123,6 +24126,9 @@ export function heartbeatService(
         };
 
         let adapterResult: AdapterExecutionResult;
+        // Marked when a steered message reaches this execution; read at run end
+        // to post the run's final assistant message.
+        const steerDelivery: LegacyRunSteerDelivery = { delivered: false };
         const runGoalControlRequestId = readNonEmptyString(
           context.goalControlRequestId,
         );
@@ -24492,7 +24498,8 @@ export function heartbeatService(
                         startedAt: meta.startedAt,
                       });
                     },
-                    onSteerable: (steer) => setLegacyRunSteering(run.id, steer),
+                    onSteerable: (steer) =>
+                      setLegacyRunSteering(run.id, steer, steerDelivery),
                     authToken: authToken ?? undefined,
                   });
                 },
@@ -25148,6 +25155,9 @@ export function heartbeatService(
                 Boolean(adapterResult.nativeFinalization) &&
                 externalChatPresentationAuthorization ===
                   CHAT_RUN_PRESENTATION_AUTHORIZATION_REASON,
+              steeredFinalText: steerDelivery.delivered
+                ? adapterResult.finalAssistantText ?? null
+                : null,
             });
             let presentationDecision: RunPresentationDecision =
               resolved.decision;

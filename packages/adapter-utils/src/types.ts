@@ -127,6 +127,13 @@ export interface AdapterExecutionResult {
    */
   referencedProjectStagingFailures?: Array<{ projectId: string; error: string }>;
   summary?: string | null;
+  /**
+   * The run's last real assistant output, set by the adapter itself (never read
+   * from provider JSON). Absent when the run ended with no assistant output, so
+   * error and stop-reason text never qualify. The server posts it only when a
+   * steered message reached the run.
+   */
+  finalAssistantText?: string;
   clearSession?: boolean;
   question?: {
     prompt: string;
