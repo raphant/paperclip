@@ -604,6 +604,16 @@ describe("parseClaudeStreamJson finalAssistantText", () => {
     ).toBeUndefined();
   });
 
+  it("is absent when the last result is not a success, even with is_error false or absent", () => {
+    for (const isError of [false, undefined]) {
+      expect(
+        parseClaudeStreamJson(
+          lines({ type: "result", subtype: "error_max_turns", is_error: isError, result: "Partial answer." }),
+        ).finalAssistantText,
+      ).toBeUndefined();
+    }
+  });
+
   it("is absent when the last result has no result string, with no assistant-text fallback", () => {
     const parsed = parseClaudeStreamJson(
       lines(assistant("assistant text only"), { type: "result", subtype: "success", is_error: false }),
