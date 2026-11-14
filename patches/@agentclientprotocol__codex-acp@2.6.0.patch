@@ -1,7 +1,7 @@
 diff --git a/dist/index.js b/dist/index.js
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -38727,7 +38727,7 @@
+@@ -40053,7 +40053,7 @@
    static permission(params, isToolApproval, correlatedCallId, nextStandaloneToolCallId) {
      if (params.mode === "form" || params.mode === "openai/form") {
        if (correlatedCallId !== void 0) {
@@ -10,7 +10,7 @@ diff --git a/dist/index.js b/dist/index.js
        }
        return {
          toolCallId: nextStandaloneToolCallId(),
-@@ -38994,7 +38994,7 @@
+@@ -40434,7 +40434,7 @@
      const signal = subagentInteractionSignal(params.threadId, this.cancellationSignal);
      try {
        const context = this.createMcpElicitationContext(params);
@@ -19,7 +19,7 @@ diff --git a/dist/index.js b/dist/index.js
          const response2 = await withSubagentUserAction(params.threadId, () => this.connection.request(
            methods.client.elicitation.create,
            this.buildElicitationRequest(params, context),
-@@ -41088,6 +41088,18 @@
+@@ -42570,6 +42570,18 @@
  var SUPPORTED_GATEWAY_PROTOCOLS = {
    openai: "responses"
  };
@@ -38,24 +38,31 @@ diff --git a/dist/index.js b/dist/index.js
  var CodexAcpClient = class _CodexAcpClient {
    codexClient;
    config;
-@@ -41581,6 +41593,8 @@
+@@ -43040,6 +43052,7 @@
      const response = await this.resumeThreadWithInstructions({
        excludeTurns: true,
-       config: sessionConfig.config,
-+      baseInstructions: paperclipBaseInstructions(request),
+       config: config2,
 +      baseInstructions: paperclipBaseInstructions(request),
        cwd: request.cwd,
        modelProvider: await this.getResumeModelProvider(),
        threadId: request.sessionId,
-@@ -41717,6 +41731,7 @@
-     const sessionConfig = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
+@@ -43089,6 +43102,7 @@
+     const response = await this.resumeThreadWithInstructions({
+       excludeTurns: true,
+       config: config2,
++      baseInstructions: paperclipBaseInstructions(request),
+       cwd: request.cwd,
+       modelProvider: await this.getResumeModelProvider(),
+       threadId: request.sessionId,
+@@ -43187,6 +43201,7 @@
+     const { config: config2, skippedMcpServers, defaultPermissionProfileId: _defaultPermissionProfileId, ...permissionProfileMetadata } = await this.createSessionConfig(request.cwd, additionalDirectories, request.mcpServers ?? []);
      const response = await this.codexClient.threadStart({
-       config: sessionConfig.config,
+       config: config2,
 +      baseInstructions: paperclipBaseInstructions(request),
        modelProvider: this.getModelProvider(),
        cwd: request.cwd,
        ...developerInstructions !== void 0 && { developerInstructions }
-@@ -41913,6 +41928,13 @@
+@@ -43404,6 +43419,13 @@
      });
      const mergedConfig = {
        ...disableUnsupportedSkills(forceGitRootTurnDiffPaths(mergeGatewayConfig(this.config, this.gatewayConfig))),
@@ -69,16 +76,16 @@ diff --git a/dist/index.js b/dist/index.js
        projects: Object.fromEntries(sessionRoots.map((root) => [root, {
          trust_level: "trusted"
        }]))
-@@ -41926,7 +41948,7 @@
-       server: normalizeMcpServer(mcp)
-     }));
+@@ -43423,7 +43445,7 @@
+     }
+     const requestedServers = normalizeMcpServers(mcpServers).map((server) => ({ name: server.name, server }));
      let serversToConfigure = requestedServers;
 -    if (shouldDeduplicateMcpConflicts()) {
 +    if (process.env.PAPERCLIP_ACPX_ISOLATED_CONTEXT !== "1" && shouldDeduplicateMcpConflicts()) {
-       const existingNames = await this.getConfigMcpServerNames(projectPath);
+       const existingNames = this.getConfigMcpServerNames(effectiveConfig);
        serversToConfigure = requestedServers.filter((mcp) => !existingNames.has(mcp.name));
      }
-@@ -41971,10 +41993,13 @@
+@@ -43482,10 +43504,13 @@
      if (!cwd) {
        return;
      }
@@ -93,16 +100,16 @@ diff --git a/dist/index.js b/dist/index.js
      }
    }
    /**
-@@ -42078,7 +42103,7 @@
-       input: input2,
-       approvalPolicy: agentMode.approvalPolicy,
-       approvalsReviewer: agentMode.approvalsReviewer,
--      sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories),
-+      sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(paperclipSandboxPolicy(agentMode.sandboxPolicy), additionalDirectories),
+@@ -43593,7 +43618,7 @@
+       ...permissionProfileId ? {
+         permissions: permissionProfileId,
+         runtimeWorkspaceRoots: [cwd, ...additionalDirectories]
+-      } : { sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(agentMode.sandboxPolicy, additionalDirectories) },
++      } : { sandboxPolicy: addAdditionalDirectoriesToSandboxPolicy(paperclipSandboxPolicy(agentMode.sandboxPolicy), additionalDirectories) },
        summary: disableSummary ? "none" : "auto",
        effort,
        model: modelId.model,
-@@ -49900,6 +49925,9 @@
+@@ -51254,6 +51279,9 @@
          if (methodRequest.params.action === "set") {
            const objective = methodRequest.params.objective;
            await this.runWithProcessCheck(() => this.codexAcpClient.setGoal(sessionState.sessionId, objective));
@@ -118,9 +125,9 @@ diff --git a/package.json b/package.json
 @@ -69,7 +69,7 @@
    },
    "dependencies": {
-     "@agentclientprotocol/sdk": "~2.1.0",
--    "@openai/codex": "^0.165.0",
-+    "@openai/codex": "0.167.0",
+     "@agentclientprotocol/sdk": "~2.4.0",
+-    "@openai/codex": "^0.166.0",
++    "@openai/codex": "0.169.0",
      "cross-spawn": "^7.0.6",
      "diff": "^9.0.0",
      "open": "^11.0.1",

@@ -83,7 +83,7 @@ function acpxExecution(
       profile: {
         driverKind: "acpx_runtime",
         protocolVersion: 1,
-        acpxVersion: "0.21.1",
+        acpxVersion: "0.22.0",
         agent,
         agentProfileVersion: 1,
         agentServerPackage:
@@ -93,7 +93,7 @@ function acpxExecution(
               ? "pi-acp"
               : "@agentclientprotocol/claude-agent-acp",
         agentServerVersion:
-          agent === "codex" ? "2.5.0" : agent === "pi" ? "0.0.33" : "0.101.0",
+          agent === "codex" ? "2.6.0" : agent === "pi" ? "0.0.33" : "0.107.0",
         agentRuntimePackage:
           agent === "pi"
             ? "@earendil-works/pi-coding-agent"
@@ -101,13 +101,13 @@ function acpxExecution(
               ? "@openai/codex"
               : "@anthropic-ai/claude-agent-sdk",
         agentRuntimeVersion:
-          agent === "pi" ? "0.84.2" : agent === "codex" ? "0.167.0" : "0.3.319",
+          agent === "pi" ? "0.84.2" : agent === "codex" ? "0.169.0" : "0.3.325",
         commandDigest:
           agent === "codex"
-            ? "sha256:4538f039b9736675132683f556d9361b257dcbc8b373a66507d823f6a4d18d3d"
+            ? "sha256:7bfc39d082a4f54311dad61b4f988615127963af15a4569f2ed05df414ab3659"
             : agent === "pi"
               ? "sha256:8c696f38296d53d0061fa11534570c5ddd951b63532aed30e0f1fcc676dc169f"
-              : "sha256:a588a38be1121345a70345196476801c5a57cba5671812d51803dd2a91044cce",
+              : "sha256:f766071bfb432f79036ca90c67efc5306373be6b5129a240820d03146d2f4cb9",
       },
     },
   };
@@ -435,7 +435,7 @@ describe("native backend factory", () => {
     await expect(backend.descriptor()).resolves.toMatchObject({
       kind: "runner",
       name: "acpx_runtime",
-      version: "0.21.1",
+      version: "0.22.0",
       capabilities: {
         resume: true,
         interruption: true,
@@ -455,7 +455,7 @@ describe("native backend factory", () => {
 
       await expect(backend.descriptor()).resolves.toMatchObject({
         name: "acpx_runtime",
-        version: "0.21.1",
+        version: "0.22.0",
         capabilities: {
           steering: false,
           resume: true,
@@ -482,7 +482,7 @@ describe("native backend factory", () => {
 
       await expect(backend.descriptor()).resolves.toMatchObject({
         name: "acpx_runtime",
-        version: "0.21.1",
+        version: "0.22.0",
       });
     },
   );
