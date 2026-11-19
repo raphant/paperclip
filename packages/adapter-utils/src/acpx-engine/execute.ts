@@ -4512,6 +4512,9 @@ export function createAcpxEngineExecutor(deps: AcpxEngineExecutorOptions = {}) {
             ...referencedProjectStagingFailuresField,
             model: prepared.requestedModel || null,
             clearSession,
+            // ensureSession only starts the agent and opens its session; no
+            // prompt is sent before startTurn, so a retry cannot repeat work.
+            executionRecovery: { kind: "bootstrap", providerWorkStarted: false },
             resultJson: { phase: "ensure_session" },
             summary: message,
           };

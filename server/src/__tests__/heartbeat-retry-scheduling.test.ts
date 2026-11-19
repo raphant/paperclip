@@ -506,6 +506,27 @@ describeEmbeddedPostgres("heartbeat bounded retry scheduling", () => {
     expect(await getExecutionBlocker(db, companyId, issueId)).toBeNull();
   });
 
+  // Fork: a run cut off before provider work started (a startup handshake
+  // ended by a host sleep) on an in-review issue gets the bounded retry that an
+  // in_progress issue gets, instead of leaving the issue in review with nothing
+  // left to wake it (2026-11-17, SEL-1117).
+  it("retries an in-review issue's run that was cut off before provider work started", async () => {
+    const { issueId, runId } = await seedMaxTurnFixture({ issueStatus: "in_review" });
+    await db.update(heartbeatRuns).set({ status: "cancelled", errorCode: "cancelled",
+      error: "The ACP startup handshake did not finish before the startup deadline.",
+      resultJson: { executionRecovery: { kind: "bootstrap", providerWorkStarted: false }, phase: "ensure_session" } })
+      .where(eq(heartbeatRuns.id, runId));
+    await db.update(issues).set({ executionRunId: null, executionLockedAt: null }).where(eq(issues.id, issueId));
+
+    await heartbeatService(db).reconcileStrandedAssignedIssues();
+
+    const retries = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.retryOfRunId, runId));
+    expect(retries).toHaveLength(1);
+    expect(retries[0]).toMatchObject({ status: "scheduled_retry", scheduledRetryAttempt: 1 });
+    const [issue] = await db.select().from(issues).where(eq(issues.id, issueId));
+    expect(issue?.status).toBe("in_review");
+  });
+
   it.each(["dependency", "disabled", "reassigned"])("respects the %s gate for interrupted conversations", async gate => {
     const { companyId, agentId, issueId, runId, now } = await seedMaxTurnFixture();
     await db.update(heartbeatRuns).set({ status: "interrupted", errorCode: "process_lost",

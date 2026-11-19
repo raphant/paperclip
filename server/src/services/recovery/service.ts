@@ -4910,6 +4910,63 @@ export function recoveryService(
 
       if (issue.status === "in_review") {
         if (!participantAgentId || !pendingExecutionState) {
+          // Fork: an assignee run on an in-review issue (a monitor check, a
+          // comment wake) that ended before provider work started, such as a
+          // startup handshake cut off by a host sleep, gets the same bounded
+          // retry as an in_progress issue. Without it the issue sits in review
+          // with nothing left to wake it. Runs with any other outcome keep
+          // upstream's skip.
+          const cutOffEvidence = latestRun
+            ? parseObject(parseObject(latestRun.resultJson).executionRecovery)
+            : null;
+          if (
+            latestRun &&
+            latestRun.agentId === agentId &&
+            agentInvokable &&
+            ["failed", "timed_out", "interrupted", "cancelled"].includes(latestRun.status) &&
+            cutOffEvidence?.kind === "bootstrap" &&
+            cutOffEvidence.providerWorkStarted === false &&
+            !(await isInvocationBudgetBlocked(issue, agentId))
+          ) {
+            const recoveryOutcome: { retryExhausted?: boolean } = {};
+            const queued = await enqueueStrandedIssueRecovery({
+              issueId: issue.id,
+              agentId,
+              reason: "issue_continuation_needed",
+              retryReason: "issue_continuation_needed",
+              source: "issue.in_review_bootstrap_retry",
+              retryOfRunId: latestRun.id,
+              outcome: recoveryOutcome,
+            });
+            if (queued) {
+              result.continuationRequeued += 1;
+              result.issueIds.push(issue.id);
+              continue;
+            }
+            if (
+              recoveryOutcome.retryExhausted &&
+              !(await hasActiveExecutionPath(issue.companyId, issue.id, null))
+            ) {
+              const updated = await escalateStrandedAssignedIssue({
+                issue,
+                previousStatus: "in_review",
+                latestRun,
+                notice: {
+                  body:
+                    "Paperclip retried this in-review issue's run after its startup was cut off, but the bounded retry " +
+                    "budget is spent and it still has no live execution path. " +
+                    "Moving it to `blocked` so it is visible for intervention.",
+                  title: "No live execution path",
+                  tone: "danger",
+                },
+              });
+              if (updated) {
+                result.escalated += 1;
+                result.issueIds.push(issue.id);
+                continue;
+              }
+            }
+          }
           result.skipped += 1;
           continue;
         }
