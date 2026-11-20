@@ -88,6 +88,7 @@ import {
 import { questionResponseDeliveryService } from "./services/question-response-delivery.js";
 import { deliverNativeQuestionResponse } from "./services/native-runtime/native-question-bridge.js";
 import { queueIssueAssignmentWakeup } from "./services/issue-assignment-wakeup.js";
+import { startHostSleepWatch, stopHostSleepWatch } from "./services/host-sleep-hold.js";
 import { createSecretProposalsService } from "./services/secret-proposals.js";
 import { environmentRuntimeService } from "./services/environment-runtime.js";
 import { createDbAdapterAuthSessionStore } from "./services/device-login-service.js";
@@ -1628,6 +1629,7 @@ async function startServerWithDatabaseTeardown(
     };
     await runRetentionSweep();
 
+    startHostSleepWatch();
     startHeartbeatSchedulerInterval(() => {
       // Track the outer async callback as well as the work it starts. Shutdown
       // can then wait through an already-running suppression check before it
@@ -1928,6 +1930,7 @@ async function startServerWithDatabaseTeardown(
       clearInterval(heartbeatSchedulerInterval);
       heartbeatSchedulerInterval = null;
     }
+    stopHostSleepWatch();
 
     const heartbeatShutdown = await coordinateHeartbeatSchedulerShutdown({
       signal,

@@ -3,6 +3,7 @@ import { hasWorkspaceRestoreFailure } from "@paperclipai/shared";
 import { externalConversationStateSql, nonIdleSlackIssueCondition } from "./slack-conversation-state.js";
 import { settleSlackConversation } from "./slack-conversation-lifecycle.js";
 import { publicChatTaskUrl } from "./chat-task-url.js";
+import { isHostSleepHeld } from "./host-sleep-hold.js";
 import { toolActionDeliveryService } from "./tool-action-delivery.js";
 import { githubBotConnectionIdsForRun } from "./chat-github-tools.js";
 import { readQueuedInteractionResponse } from "./queued-interaction-response.js";
@@ -9401,7 +9402,11 @@ export function resolveHeartbeatSchedulingSuppression(
 ): {
   suppressed: boolean;
   reason:
-    "worktree_instance" | "database_restore_in_progress" | "task_drain" | null;
+    | "worktree_instance"
+    | "database_restore_in_progress"
+    | "task_drain"
+    | "host_sleep"
+    | null;
 } {
   if (
     isTruthyRuntimeEnvValue(env.PAPERCLIP_IN_WORKTREE) &&
@@ -9417,6 +9422,9 @@ export function resolveHeartbeatSchedulingSuppression(
   }
   if (readTaskDrain(new Date()) !== null) {
     return { suppressed: true, reason: "task_drain" };
+  }
+  if (isHostSleepHeld(Date.now())) {
+    return { suppressed: true, reason: "host_sleep" };
   }
   return { suppressed: false, reason: null };
 }
@@ -17828,13 +17836,13 @@ export function heartbeatService(
   // startNextQueuedRunForAgent checks admission suppression once, then claims
   // runs (sets status "running"), then dispatches each to executeRun, which
   // checks suppression again before it does any work. Suppression (task
-  // drain, worktree mode, a database restore) can start in the gap between
-  // those two checks. When executeRun's check catches that, the run is
-  // already claimed — release it back to "queued" so it does not keep a
-  // running execution lock that nothing will ever process. This runs inside
-  // the same promise startNextQueuedRunForAgent already tracks in
-  // activeRunExecutionPromises, so getTaskDrainStatus() keeps reporting the
-  // run as active until the release finishes.
+  // drain, a host-sleep hold, worktree mode, a database restore) can start
+  // in the gap between those two checks. When executeRun's check catches
+  // that, the run is already claimed — release it back to "queued" so it
+  // does not keep a running execution lock that nothing will ever process.
+  // This runs inside the same promise startNextQueuedRunForAgent already
+  // tracks in activeRunExecutionPromises, so getTaskDrainStatus() keeps
+  // reporting the run as active until the release finishes.
   //
   // The run row, the wakeup request, and the issue execution lock all guard
   // the same claim, so one transaction commits all three writes together. A
@@ -20119,7 +20127,7 @@ export function heartbeatService(
       } catch (err) {
         logger.error(
           { err, runId },
-          "failed to release run claimed just before task-drain suppression; the run row stays running, and the orphan reaper finalizes it and releases the issue lock on its next cycle",
+          "failed to release run claimed just before scheduling suppression (task drain or host sleep); the run row stays running, and the orphan reaper finalizes it and releases the issue lock on its next cycle",
         );
       }
       return;
@@ -26480,18 +26488,19 @@ export function heartbeatService(
     };
 
     const schedulingSuppression = await getSchedulingSuppression();
-    // A task drain holds ADMISSION, not the request. The drain is a
-    // process-local pre-restart hold, so a wake that arrives while it is
-    // active still names real work that must run once the process comes
-    // back: leave it in the durable queue and let the dispatch-side checks
-    // (startNextQueuedRunForAgent / executeRun) keep it from starting until
-    // the drain lifts or the restart clears it. Writing it as `skipped`
-    // here dropped the wake permanently — an accepted plan whose
-    // continuation wake landed mid-drain left its issue in `todo` with no
-    // run and no path until a person noticed.
+    // A task drain and a host-sleep hold hold ADMISSION, not the request.
+    // Both are process-local holds (a pre-restart drain; a host asleep or
+    // just woken), so a wake that arrives while one is active still names
+    // real work that must run once it lifts: leave it in the durable queue
+    // and let the dispatch-side checks (startNextQueuedRunForAgent /
+    // executeRun) keep it from starting until the hold lifts or a restart
+    // clears it. Writing it as `skipped` here dropped the wake permanently —
+    // an accepted plan whose continuation wake landed mid-drain left its
+    // issue in `todo` with no run and no path until a person noticed.
     if (
       schedulingSuppression.suppressed &&
-      schedulingSuppression.reason !== "task_drain"
+      schedulingSuppression.reason !== "task_drain" &&
+      schedulingSuppression.reason !== "host_sleep"
     ) {
       await writeSkippedHeartbeatRequest("heartbeat.scheduling_suppressed", {
         reason: schedulingSuppression.reason,

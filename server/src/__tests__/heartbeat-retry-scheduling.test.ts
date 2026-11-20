@@ -56,6 +56,7 @@ vi.mock("../services/heartbeat-run-events.js", async (importOriginal) => {
 
 import { appendHeartbeatRunEvent } from "../services/heartbeat-run-events.js";
 import { subscribeCompanyLiveEvents } from "../services/live-events.js";
+import { recordHostSleepTick, stopHostSleepWatch } from "../services/host-sleep-hold.js";
 import {
   BOUNDED_TRANSIENT_HEARTBEAT_RETRY_DELAYS_MS,
   INTERACTION_CONTINUATION_INFRA_RETRY_REASON,
@@ -133,6 +134,7 @@ describeEmbeddedPostgres("heartbeat bounded retry scheduling", () => {
     // wakeup, so a run or wakeup can still write heartbeat_runs and issues rows
     // when teardown starts. The cleanup deletes issues before heartbeat_runs, so
     // a late write races the deletes and can deadlock or break a foreign key.
+    stopHostSleepWatch();
     await drainHeartbeatRunsToQuiescence(db, heartbeat);
     await cleanupRetryFixture();
     vi.clearAllMocks();
@@ -525,6 +527,45 @@ describeEmbeddedPostgres("heartbeat bounded retry scheduling", () => {
     expect(retries[0]).toMatchObject({ status: "scheduled_retry", scheduledRetryAttempt: 1 });
     const [issue] = await db.select().from(issues).where(eq(issues.id, issueId));
     expect(issue?.status).toBe("in_review");
+  });
+
+  it("holds a due retry while the host sleeps and runs it after the hold lifts without spending an attempt", async () => {
+    const companyId = randomUUID(), agentId = randomUUID(), issueId = randomUUID(), sourceRunId = randomUUID();
+    const now = new Date();
+    const issuePrefix = `T${companyId.replace(/-/g, "").slice(0, 6).toUpperCase()}`;
+    await db.insert(companies).values({ id: companyId, name: "Paperclip", issuePrefix,
+      requireBoardApprovalForNewAgents: false, defaultResponsibleUserId: "responsible-user" });
+    await db.insert(agents).values({ id: agentId, companyId, name: "SleepyCoder", role: "engineer", status: "active",
+      adapterType: "process", adapterConfig: { command: process.execPath, args: ["-e", "process.exit(0)"] },
+      runtimeConfig: { heartbeat: { wakeOnDemand: true, maxConcurrentRuns: 1 } }, permissions: {} });
+    await db.insert(heartbeatRuns).values({ id: sourceRunId, companyId, agentId, invocationSource: "assignment",
+      triggerDetail: "system", status: "cancelled", errorCode: "cancelled",
+      error: "The ACP startup handshake did not finish before the startup deadline.",
+      resultJson: { executionRecovery: { kind: "bootstrap", providerWorkStarted: false } },
+      finishedAt: now, contextSnapshot: { issueId, wakeReason: "issue_assigned" }, updatedAt: now, createdAt: now });
+    await db.insert(issues).values({ id: issueId, companyId, title: "Cut off by a host sleep", status: "in_progress",
+      priority: "medium", responsibleUserId: "responsible-user", assigneeAgentId: agentId,
+      issueNumber: 1, identifier: `${issuePrefix}-1` });
+
+    const scheduled = await heartbeat.scheduleBoundedRetry(sourceRunId, { now, random: () => 0 });
+    expect(scheduled).toMatchObject({ outcome: "scheduled", attempt: 1 });
+    if (scheduled.outcome !== "scheduled") throw new Error("Expected a bounded retry");
+    const retryId = scheduled.run.id;
+
+    // The retry falls due in a short wake: a 10 s tick gap holds admission.
+    const wokeAt = Date.now();
+    recordHostSleepTick(wokeAt - 10_000);
+    recordHostSleepTick(wokeAt);
+    expect(await heartbeat.promoteDueScheduledRetries(scheduled.dueAt)).toEqual({ promoted: 1, runIds: [retryId] });
+    await heartbeat.resumeQueuedRuns();
+    await heartbeat.drainActiveRunExecutions();
+    expect(await heartbeat.getRun(retryId)).toMatchObject({ status: "queued", scheduledRetryAttempt: 1 });
+
+    // 120 s of ticks with no gap lift the hold; the same retry runs once.
+    for (let t = wokeAt + 1_000; t <= wokeAt + 120_000; t += 1_000) recordHostSleepTick(t);
+    await heartbeat.resumeQueuedRuns();
+    expect(await waitForRunToFinish(heartbeat, retryId)).toMatchObject({ status: "succeeded", scheduledRetryAttempt: 1 });
+    expect(await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.retryOfRunId, sourceRunId))).toHaveLength(1);
   });
 
   it.each(["dependency", "disabled", "reassigned"])("respects the %s gate for interrupted conversations", async gate => {

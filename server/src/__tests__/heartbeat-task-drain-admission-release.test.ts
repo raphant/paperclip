@@ -19,6 +19,7 @@ import {
 } from "./helpers/embedded-postgres.js";
 import { heartbeatService, getTaskDrainStatus, startTaskDrain, stopTaskDrain } from "../services/heartbeat.ts";
 import { subscribeCompanyLiveEvents } from "../services/live-events.ts";
+import { recordHostSleepTick, stopHostSleepWatch } from "../services/host-sleep-hold.ts";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
@@ -62,6 +63,7 @@ describeEmbeddedPostgres("heartbeat task-drain admission release", () => {
 
   afterEach(async () => {
     stopTaskDrain();
+    stopHostSleepWatch();
     await deleteHeartbeatRunsWithDependents();
     await db.delete(agentWakeupRequests);
     await db.delete(issues);
@@ -282,6 +284,69 @@ describeEmbeddedPostgres("heartbeat task-drain admission release", () => {
     // The drain lifts (a restart clears it the same way): the queued wake
     // runs to completion through the normal admission path.
     stopTaskDrain();
+    await heartbeat.resumeQueuedRuns();
+    await heartbeat.drainActiveRunExecutions();
+    const finished = await db
+      .select({ status: heartbeatRuns.status })
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.id, runId))
+      .then((rows) => rows[0] ?? null);
+    expect(finished?.status).toBe("succeeded");
+    const completedWakeup = await db
+      .select({ status: agentWakeupRequests.status })
+      .from(agentWakeupRequests)
+      .then((rows) => rows[0] ?? null);
+    expect(completedWakeup?.status).toBe("completed");
+  }, 20_000);
+
+  it("keeps a wake that arrives during a host-sleep hold queued and runs it once the hold lifts", async () => {
+    const { agentId, issueId } = await seedAgentAndIssue();
+    const heartbeat = heartbeatService(db);
+
+    // A 10 s tick gap: the host slept and is in a (possibly short) wake.
+    const wokeAt = Date.now();
+    recordHostSleepTick(wokeAt - 10_000);
+    recordHostSleepTick(wokeAt);
+    await heartbeat.wakeup(agentId, {
+      source: "assignment",
+      triggerDetail: "system",
+      reason: "issue_assigned",
+      payload: { issueId },
+      contextSnapshot: { issueId, wakeReason: "issue_assigned" },
+      requestedByActorType: "system",
+      requestedByActorId: "issue_assignment",
+    });
+    await heartbeat.drainActiveRunExecutions();
+
+    const wakeup = await db
+      .select({
+        status: agentWakeupRequests.status,
+        reason: agentWakeupRequests.reason,
+        payload: agentWakeupRequests.payload,
+      })
+      .from(agentWakeupRequests)
+      .then((rows) => rows[0] ?? null);
+    expect(wakeup).toMatchObject({ status: "queued", reason: "issue_assigned" });
+    expect(wakeup?.payload).not.toHaveProperty("heartbeatSkip");
+    const queuedRuns = await db
+      .select({ id: heartbeatRuns.id, status: heartbeatRuns.status })
+      .from(heartbeatRuns);
+    expect(queuedRuns).toHaveLength(1);
+    expect(queuedRuns[0]).toMatchObject({ status: "queued" });
+    const runId = queuedRuns[0]!.id;
+
+    await heartbeat.resumeQueuedRuns();
+    await heartbeat.drainActiveRunExecutions();
+    const held = await db
+      .select({ status: heartbeatRuns.status })
+      .from(heartbeatRuns)
+      .where(eq(heartbeatRuns.id, runId))
+      .then((rows) => rows[0] ?? null);
+    expect(held?.status).toBe("queued");
+
+    // 120 s of ticks with no gap: the host is awake for good, the hold
+    // lifts, and the queued wake runs through the normal admission path.
+    for (let t = wokeAt + 1_000; t <= wokeAt + 120_000; t += 1_000) recordHostSleepTick(t);
     await heartbeat.resumeQueuedRuns();
     await heartbeat.drainActiveRunExecutions();
     const finished = await db
