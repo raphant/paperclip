@@ -82,6 +82,8 @@ const {
     sweepPendingCleanupLeases: vi.fn(async () => ({ swept: 0, destroyed: 0, capped: 0 })),
     sweepExpiredRuntimeStatuses: vi.fn(() => 0),
     tickTimers: vi.fn(async () => ({ checked: 0, enqueued: 0, skipped: 0 })),
+    drainRunningRunsForShutdown: vi.fn(async () => ({ drained: 0 })),
+    drainActiveRunExecutions: vi.fn(async () => undefined),
   };
   const heartbeatServiceFactoryMock = vi.fn(() => heartbeatServiceMock);
   const issueThreadInteractionServiceMock = {
@@ -201,6 +203,24 @@ function buildTestConfig(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+// The host-sleep hold is driven by hand: `held` turns the hold on, and the
+// wait polls its stop check like the real one.
+const hostSleepMock = vi.hoisted(() => ({ held: false, waitEntered: vi.fn() }));
+vi.mock("../services/host-sleep-hold.js", () => ({
+  startHostSleepWatch: vi.fn(),
+  stopHostSleepWatch: vi.fn(),
+  isHostSleepHeld: vi.fn(() => hostSleepMock.held),
+  waitUntilHostAwake: vi.fn(async (stopped: () => boolean) => {
+    hostSleepMock.waitEntered();
+    while (hostSleepMock.held && !stopped()) await new Promise((resolve) => setTimeout(resolve, 10));
+  }),
+}));
+
+vi.mock("../shutdown.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../shutdown.js")>();
+  return { ...actual, finalizeServerShutdown: vi.fn(actual.finalizeServerShutdown) };
+});
 
 vi.mock("node:http", () => ({
   createServer: vi.fn(() => fakeServer),
@@ -410,6 +430,7 @@ vi.mock("../auth/better-auth.js", () => ({
 }));
 
 import { startServer } from "../index.ts";
+import { finalizeServerShutdown } from "../shutdown.js";
 import { reconcileSafeNativeReplacements } from "../services/native-runtime/native-safe-replacement.js";
 import { EXECUTION_RECONCILIATION_INTERVAL_MS } from "../services/execution-control-deadline.js";
 
@@ -875,5 +896,69 @@ describe("startServer PAPERCLIP_API_URL handling", () => {
     expect(started.listenPort).toBe(3110);
     expect(started.apiUrl).toBe("https://paperclip.example");
     expect(process.env.PAPERCLIP_RUNTIME_API_URL).toBe("https://paperclip.example");
+  });
+
+  describe("a stop signal during startup", () => {
+    let savedListeners: Record<"SIGINT" | "SIGTERM", Array<(...args: unknown[]) => void>>;
+    let exitSpy: ReturnType<typeof vi.spyOn>;
+
+    // Earlier tests leave their own signal handlers on the process; keep only
+    // the ones this startup registers, and restore the rest after.
+    beforeEach(() => {
+      savedListeners = {
+        SIGINT: process.listeners("SIGINT") as Array<(...args: unknown[]) => void>,
+        SIGTERM: process.listeners("SIGTERM") as Array<(...args: unknown[]) => void>,
+      };
+      process.removeAllListeners("SIGINT");
+      process.removeAllListeners("SIGTERM");
+      exitSpy = vi.spyOn(process, "exit").mockImplementation((() => undefined) as never);
+      loadConfigMock.mockReturnValue(buildTestConfig({ heartbeatSchedulerEnabled: true }));
+    });
+
+    afterEach(() => {
+      hostSleepMock.held = false;
+      exitSpy.mockRestore();
+      process.removeAllListeners("SIGINT");
+      process.removeAllListeners("SIGTERM");
+      for (const signal of ["SIGINT", "SIGTERM"] as const) {
+        for (const listener of savedListeners[signal]) process.on(signal, listener);
+      }
+    });
+
+    it("shuts down once, skipping startup recovery, when SIGTERM arrives during the host-sleep wait", async () => {
+      hostSleepMock.held = true;
+      const started = startServer();
+      await vi.waitFor(() => expect(hostSleepMock.waitEntered).toHaveBeenCalledTimes(1), { timeout: 5_000 });
+
+      process.emit("SIGTERM");
+      await started;
+      await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(0), { timeout: 5_000 });
+
+      expect(heartbeatServiceMock.recoverNativeRunsAfterRestart).not.toHaveBeenCalled();
+      expect(heartbeatServiceMock.reconcileHotRestartAdoption).not.toHaveBeenCalled();
+      expect(heartbeatServiceMock.reapOrphanedRuns).not.toHaveBeenCalled();
+      expect(heartbeatServiceMock.promoteDueScheduledRetries).not.toHaveBeenCalled();
+      expect(heartbeatServiceMock.resumeQueuedRuns).not.toHaveBeenCalled();
+      expect(heartbeatServiceMock.recoverPendingSessionGoalActions).not.toHaveBeenCalled();
+      expect(heartbeatServiceMock.recoverActiveSessionGoals).not.toHaveBeenCalled();
+      expect(heartbeatServiceMock.drainRunningRunsForShutdown).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(finalizeServerShutdown)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(finalizeServerShutdown).mock.calls[0]?.[0]).toMatchObject({ signal: "SIGTERM" });
+      expect(exitSpy).toHaveBeenCalledTimes(1);
+      expect(process.listenerCount("SIGTERM")).toBe(0);
+    });
+
+    it("shuts down once when SIGTERM arrives after startup, and leaves no startup listener behind", async () => {
+      await startServer();
+      expect(heartbeatServiceMock.reapOrphanedRuns).toHaveBeenCalledTimes(1);
+      expect(process.listenerCount("SIGTERM")).toBe(1);
+
+      process.emit("SIGTERM");
+      await vi.waitFor(() => expect(exitSpy).toHaveBeenCalledWith(0), { timeout: 5_000 });
+
+      expect(vi.mocked(finalizeServerShutdown)).toHaveBeenCalledTimes(1);
+      expect(exitSpy).toHaveBeenCalledTimes(1);
+      expect(process.listenerCount("SIGTERM")).toBe(0);
+    });
   });
 });

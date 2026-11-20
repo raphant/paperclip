@@ -881,6 +881,24 @@ async function startServerWithDatabaseTeardown(
   const heartbeat = config.heartbeatSchedulerEnabled
     ? heartbeatService(db as any, { pluginWorkerManager })
     : null;
+  let heartbeatSchedulerStopped = false;
+  let startupStopSignal: "SIGINT" | "SIGTERM" | null = null;
+  // A stop that arrives before startup finishes, including during the
+  // host-sleep wait below, is held here for shutdown: it marks the scheduler
+  // stopped, so the wait ends and startup recovery is skipped, and the handler
+  // registration at the end of startup hands the signal to shutdown. Without
+  // a listener, the signal would kill the process with no drain and leave
+  // embedded Postgres running.
+  const onStartupSigint = () => {
+    startupStopSignal ??= "SIGINT";
+    heartbeatSchedulerStopped = true;
+  };
+  const onStartupSigterm = () => {
+    startupStopSignal ??= "SIGTERM";
+    heartbeatSchedulerStopped = true;
+  };
+  process.on("SIGINT", onStartupSigint);
+  process.on("SIGTERM", onStartupSigterm);
   if (heartbeat) startHostSleepWatch();
   const decisionServiceOptions = {
     wakeOriginAgent: createDecisionWakeOriginAgent(heartbeat?.wakeup ?? null),
@@ -1144,7 +1162,6 @@ async function startServerWithDatabaseTeardown(
     skipDrain: boolean;
     drainRunIds?: string[];
   }>) | null = null;
-  let heartbeatSchedulerStopped = false;
   let heartbeatSchedulerInterval: ReturnType<typeof setInterval> | null = null;
   const heartbeatSchedulerInFlight = new Set<Promise<void>>();
   const trackHeartbeatSchedulerWork = (work: Promise<unknown>) => {
@@ -1442,7 +1459,8 @@ async function startServerWithDatabaseTeardown(
     );
     // A process started in or just after a host sleep waits for the hold to
     // lift, then runs startup recovery as usual. Skipping it under the hold
-    // would lose its startup-only recoveries for the life of the process.
+    // would lose its startup-only recoveries for the life of the process. A
+    // stop during the wait ends it, and recovery is skipped below.
     if (isHostSleepHeld(Date.now())) {
       logger.info("startup recovery waits for the host to wake");
       await waitUntilHostAwake(() => heartbeatSchedulerStopped);
@@ -1451,9 +1469,9 @@ async function startServerWithDatabaseTeardown(
 
     // Reap orphaned runs before timer ticks start so wakeups cannot coalesce
     // into a dead "running" row during startup recovery.
-    if (heartbeatSchedulingSuppression.suppressed) {
+    if (heartbeatSchedulingSuppression.suppressed || heartbeatSchedulerStopped) {
       logger.warn(
-        { reason: heartbeatSchedulingSuppression.reason },
+        { reason: heartbeatSchedulingSuppression.reason, stopping: heartbeatSchedulerStopped },
         "heartbeat scheduling suppressed for this runtime instance",
       );
     } else {
@@ -2035,12 +2053,18 @@ async function startServerWithDatabaseTeardown(
     if (exitProcess) process.exit(0);
   };
 
-  process.once("SIGINT", () => {
-    void shutdown("SIGINT", true);
-  });
-  process.once("SIGTERM", () => {
-    void shutdown("SIGTERM", true);
-  });
+  process.off("SIGINT", onStartupSigint);
+  process.off("SIGTERM", onStartupSigterm);
+  if (startupStopSignal) {
+    void shutdown(startupStopSignal, true);
+  } else {
+    process.once("SIGINT", () => {
+      void shutdown("SIGINT", true);
+    });
+    process.once("SIGTERM", () => {
+      void shutdown("SIGTERM", true);
+    });
+  }
 
   return {
     server,
