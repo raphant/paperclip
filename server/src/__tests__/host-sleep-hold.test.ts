@@ -12,8 +12,11 @@ vi.mock("../middleware/logger.js", () => ({ logger: mockLogger }));
 import {
   HOST_AWAKE_MS,
   isHostSleepHeld,
+  parseSysctlTimevalMs,
   recordHostSleepTick,
+  startHostSleepWatch,
   stopHostSleepWatch,
+  waitUntilHostAwake,
 } from "../services/host-sleep-hold.ts";
 
 const T0 = Date.parse("2026-11-19T20:59:00.000Z");
@@ -26,6 +29,7 @@ function tickEverySecond(from: number, to: number) {
 describe("host-sleep hold", () => {
   afterEach(() => {
     stopHostSleepWatch();
+    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
@@ -89,5 +93,69 @@ describe("host-sleep hold", () => {
       [{ sleptMs: 1_200_000, heldMs: 303_000, sleeps: 2 }, "host slept again; run admission stays held"],
       [{ sleptMs: 1_200_000, heldMs: 303_000 + HOST_AWAKE_MS, sleeps: 2 }, "host awake; run admission resumed"],
     ]);
+  });
+
+  describe("a process that starts in or near a short wake", () => {
+    it("holds at start when the kernel woke 2 s ago, still holds 60 s later, and lifts at wake + 120 s", () => {
+      vi.useFakeTimers({ now: T0 });
+      const wakeMs = T0 - 2_000;
+      startHostSleepWatch({ readKernelWake: () => ({ wakeMs, sleepMs: wakeMs - 900_000 }) });
+      expect(isHostSleepHeld(Date.now())).toBe(true);
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        { sleptMs: 900_000, wokeMsAgo: 2_000 },
+        "host woke shortly before this process started; holding run admission",
+      );
+
+      vi.advanceTimersByTime(60_000);
+      expect(isHostSleepHeld(Date.now())).toBe(true);
+      vi.advanceTimersByTime(wakeMs + HOST_AWAKE_MS - Date.now() - 1_000);
+      expect(isHostSleepHeld(Date.now())).toBe(true);
+      vi.advanceTimersByTime(1_000);
+      expect(Date.now()).toBe(wakeMs + HOST_AWAKE_MS);
+      expect(isHostSleepHeld(Date.now())).toBe(false);
+    });
+
+    it("does not hold after a wake 3 h ago, or when the reader returns null or throws", () => {
+      vi.useFakeTimers({ now: T0 });
+      const readers = [
+        () => ({ wakeMs: T0 - 3 * 3_600_000, sleepMs: T0 - 4 * 3_600_000 }),
+        () => null,
+        () => {
+          throw new Error("sysctl failed");
+        },
+      ];
+      for (const readKernelWake of readers) {
+        startHostSleepWatch({ readKernelWake });
+        expect(isHostSleepHeld(Date.now())).toBe(false);
+        vi.advanceTimersByTime(10_000);
+        expect(isHostSleepHeld(Date.now())).toBe(false);
+      }
+      expect(mockLogger.info).not.toHaveBeenCalled();
+    });
+
+    it("parses the real kern.waketime output to ms since epoch", () => {
+      expect(parseSysctlTimevalMs("{ sec = 1795149290, usec = 999315 } Thu Nov 19 22:34:50 2026")).toBe(1795149290999);
+      expect(parseSysctlTimevalMs("")).toBeNull();
+    });
+
+    it("waitUntilHostAwake resolves at the lift, and at once when stopped", async () => {
+      vi.useFakeTimers({ now: T0 });
+      startHostSleepWatch({ readKernelWake: () => ({ wakeMs: T0, sleepMs: T0 - 60_000 }) });
+      let resolvedAt: number | null = null;
+      const waiting = waitUntilHostAwake(() => false).then(() => {
+        resolvedAt = Date.now();
+      });
+      await vi.advanceTimersByTimeAsync(HOST_AWAKE_MS - 1_000);
+      expect(resolvedAt).toBeNull();
+      await vi.advanceTimersByTimeAsync(1_000);
+      await waiting;
+      expect(resolvedAt).toBe(T0 + HOST_AWAKE_MS);
+
+      startHostSleepWatch({ readKernelWake: () => ({ wakeMs: Date.now(), sleepMs: Date.now() - 60_000 }) });
+      expect(isHostSleepHeld(Date.now())).toBe(true);
+      const stoppedAt = Date.now();
+      await waitUntilHostAwake(() => true);
+      expect(Date.now()).toBe(stoppedAt);
+    });
   });
 });
