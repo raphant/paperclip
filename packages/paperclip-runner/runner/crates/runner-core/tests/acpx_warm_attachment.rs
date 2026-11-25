@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 const PROFILE_DIGEST: &str =
-    "sha256:7bfc39d082a4f54311dad61b4f988615127963af15a4569f2ed05df414ab3659";
+    "sha256:f3bc7ca89f31ec20c2396a78cdd01a250b1cd166f7b70e21638dd6ec484d1429";
 
 struct Fixture(PathBuf);
 impl Drop for Fixture {
@@ -82,8 +82,8 @@ fn checkpoints_the_sidecar_and_rebinds_consecutive_warm_runs_before_accepting_wo
         "kind": "acpx", "provider": "acpx", "driver": "acpx_runtime",
         "providerVersion": "0.22.0", "agent": "codex", "model": "gpt-5.6-sol",
         "acpxVersion": "0.22.0", "agentServerPackage": "@agentclientprotocol/codex-acp",
-        "agentServerVersion": "2.6.0", "agentRuntimePackage": "@openai/codex",
-        "agentRuntimeVersion": "0.169.0", "commandDigest": PROFILE_DIGEST,
+        "agentServerVersion": "2.8.0", "agentRuntimePackage": "@openai/codex",
+        "agentRuntimeVersion": "0.171.0", "commandDigest": PROFILE_DIGEST,
         "sidecarCommand": sidecar, "sidecarArgs": args, "runtimeDirectory": fixture.0,
         "normalizedSessionId": "session-1", "runId": "run-1", "cwd": fixture.0,
         "instructions": "Complete the supplied work.",

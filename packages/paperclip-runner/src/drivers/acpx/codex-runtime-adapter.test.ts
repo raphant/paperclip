@@ -2763,7 +2763,7 @@ function openOptions(
       agent: "codex",
       agentProfileVersion: 1,
       agentServerPackage: "@agentclientprotocol/codex-acp",
-      agentServerVersion: "2.6.0",
+      agentServerVersion: "2.8.0",
       agentRuntimePackage: null,
       agentRuntimeVersion: null,
       commandDigest: "sha256:test",

@@ -45,7 +45,7 @@ const acpxRuntimePatch = await readFile(
   "utf8",
 );
 const claudeAcpPatch = await readFile(
-  new URL("../patches/@agentclientprotocol__claude-agent-acp@0.107.0.patch", import.meta.url),
+  new URL("../patches/@agentclientprotocol__claude-agent-acp@0.109.0.patch", import.meta.url),
   "utf8",
 );
 
@@ -124,12 +124,12 @@ test("published packages preserve the patched ACPX runtime", () => {
 test("Paperclip Runner pins the qualified ACPX host callbacks", () => {
   assert.equal(rootPackage.pnpm.patchedDependencies["acpx@0.22.0"], "patches/acpx@0.22.0.patch");
   assert.equal(
-    rootPackage.pnpm.patchedDependencies["@agentclientprotocol/claude-agent-acp@0.107.0"],
-    "patches/@agentclientprotocol__claude-agent-acp@0.107.0.patch",
+    rootPackage.pnpm.patchedDependencies["@agentclientprotocol/claude-agent-acp@0.109.0"],
+    "patches/@agentclientprotocol__claude-agent-acp@0.109.0.patch",
   );
   assert.equal(runnerPackage.dependencies.acpx, "0.22.0");
-  assert.equal(runnerPackage.dependencies["@agentclientprotocol/claude-agent-acp"], "0.107.0");
-  assert.equal(runnerPackage.dependencies["@agentclientprotocol/codex-acp"], "2.6.0");
+  assert.equal(runnerPackage.dependencies["@agentclientprotocol/claude-agent-acp"], "0.109.0");
+  assert.equal(runnerPackage.dependencies["@agentclientprotocol/codex-acp"], "2.8.0");
   for (const callback of [
     "spawnEnvironment", "spawnCwd", "spawnAgent", "isPlainStringEnvironment",
     "onAgentSpawn", "onAgentStderr", "onAgentExit",

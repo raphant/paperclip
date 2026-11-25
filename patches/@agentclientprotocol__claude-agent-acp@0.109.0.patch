@@ -1,7 +1,7 @@
 diff --git a/dist/v1/acp-agent.js b/dist/v1/acp-agent.js
 --- a/dist/v1/acp-agent.js
 +++ b/dist/v1/acp-agent.js
-@@ -4005,9 +4005,19 @@
+@@ -4080,9 +4080,19 @@
                                              amount: message.total_cost_usd,
                                              currency: "USD",
                                          },
@@ -24,16 +24,16 @@ diff --git a/dist/v1/acp-agent.js b/dist/v1/acp-agent.js
                                      }),
                                  });
                              }
-@@ -7462,6 +7472,8 @@
-             // `promptSuggestions: false` keeps it off.
-             promptSuggestions: true,
+@@ -7643,6 +7653,8 @@
+             // and `settingsDelivery` win.
+             ...cliDelivery(userProvidedOptions?.extraArgs),
              ...userProvidedOptions,
 +            // Paperclip Runner supplies its complete context through the isolated user root.
 +            ...(process.env.PAPERCLIP_ACPX_ISOLATED_CONTEXT === "1" && { settingSources: ["user"] }),
              // Claude Code uses the same checkpoint store for /rewind. Enable it only
              // for clients that negotiated per-turn file-change reports; this avoids
              // snapshot I/O for every other session.
-@@ -7473,12 +7485,24 @@
+@@ -7654,12 +7666,24 @@
              includePartialMessages: true,
              forwardSubagentText,
              mcpServers: {

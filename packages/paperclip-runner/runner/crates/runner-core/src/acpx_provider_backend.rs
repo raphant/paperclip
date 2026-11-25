@@ -149,18 +149,18 @@ impl AcpxProviderDescriptor {
             "claude" => (
                 "claude-sonnet-5",
                 "@agentclientprotocol/claude-agent-acp",
-                "0.107.0",
+                "0.109.0",
                 Some("@anthropic-ai/claude-agent-sdk"),
-                Some("0.3.325"),
+                Some("0.3.330"),
                 "sha256:f766071bfb432f79036ca90c67efc5306373be6b5129a240820d03146d2f4cb9",
             ),
             "codex" => (
                 "gpt-5.6-sol",
                 "@agentclientprotocol/codex-acp",
-                "2.6.0",
+                "2.8.0",
                 Some("@openai/codex"),
-                Some("0.169.0"),
-                "sha256:7bfc39d082a4f54311dad61b4f988615127963af15a4569f2ed05df414ab3659",
+                Some("0.171.0"),
+                "sha256:f3bc7ca89f31ec20c2396a78cdd01a250b1cd166f7b70e21638dd6ec484d1429",
             ),
             "pi" => return Err(DurableRunnerError::invalid(
                 "ACPX agent pi is not executable through the verified runnerd provider boundary",
@@ -1850,19 +1850,19 @@ mod tests {
                 (
                     "claude-sonnet-5",
                     "@agentclientprotocol/claude-agent-acp",
-                    "0.107.0",
+                    "0.109.0",
                     json!("@anthropic-ai/claude-agent-sdk"),
-                    json!("0.3.325"),
+                    json!("0.3.330"),
                     "sha256:f766071bfb432f79036ca90c67efc5306373be6b5129a240820d03146d2f4cb9",
                 )
             } else {
                 (
                     "gpt-5.6-sol",
                     "@agentclientprotocol/codex-acp",
-                    "2.6.0",
+                    "2.8.0",
                     json!("@openai/codex"),
-                    json!("0.169.0"),
-                    "sha256:7bfc39d082a4f54311dad61b4f988615127963af15a4569f2ed05df414ab3659",
+                    json!("0.171.0"),
+                    "sha256:f3bc7ca89f31ec20c2396a78cdd01a250b1cd166f7b70e21638dd6ec484d1429",
                 )
             };
         json!({

@@ -290,11 +290,11 @@ try {
   const payload = {
     pins: {
       nodeMinimum: minimumNodeVersion.join("."),
-      codex: "0.169.0",
+      codex: "0.171.0",
       opencode: "1.18.32",
       acpx: "0.22.0",
-      claudeAcp: "0.107.0",
-      codexAcp: "2.6.0",
+      claudeAcp: "0.109.0",
+      codexAcp: "2.8.0",
     },
     target: { platform: process.platform, architecture: process.arch },
     runnerSourceRevision: `${revision}${dirty ? "-dirty" : ""}`,
@@ -310,7 +310,7 @@ try {
       claude:
         "sha256:f766071bfb432f79036ca90c67efc5306373be6b5129a240820d03146d2f4cb9",
       codex:
-        "sha256:7bfc39d082a4f54311dad61b4f988615127963af15a4569f2ed05df414ab3659",
+        "sha256:f3bc7ca89f31ec20c2396a78cdd01a250b1cd166f7b70e21638dd6ec484d1429",
     },
     artifacts: {
       nodeCommand: {

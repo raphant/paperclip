@@ -45,13 +45,13 @@ const VERIFIED_PROVIDER_RUNTIME_TARGET_ENV =
 
 const QUALIFIED_CLAUDE_LINUX_X64_RUNTIME = Object.freeze({
   runtimePackageName: "@anthropic-ai/claude-agent-sdk",
-  runtimePackageVersion: "0.3.325",
+  runtimePackageVersion: "0.3.330",
   packageName: "@anthropic-ai/claude-agent-sdk-linux-x64",
-  packageVersion: "0.3.325",
-  dependencyDeclaration: "0.3.325",
+  packageVersion: "0.3.330",
+  dependencyDeclaration: "0.3.330",
   relativeExecutable: "claude",
   executableDigest:
-    "sha256:0dc4f4a9a165fc60746d7ae8489712e5fc352f1e7ad4eb22e7141bd0812eb0cf",
+    "sha256:f390eaa0814e6a1bff74cbb47acb74cb9c89d30ced809fe0af5af00c7bfe8ebb",
   environmentVariable: "CLAUDE_CODE_EXECUTABLE",
 });
 
@@ -59,24 +59,24 @@ const QUALIFIED_CLAUDE_DARWIN_RUNTIMES = {
   arm64: Object.freeze({
     ...QUALIFIED_CLAUDE_LINUX_X64_RUNTIME,
     packageName: "@anthropic-ai/claude-agent-sdk-darwin-arm64",
-    executableDigest: "sha256:84590fefe6338be9087f5814b61f9a54c5f21524163a4c127cb5a808e31009f2",
+    executableDigest: "sha256:f7c5093b9dd6560d08af28bc27b123fb55091deae3180ac39df199522da86815",
   }),
   x64: Object.freeze({
     ...QUALIFIED_CLAUDE_LINUX_X64_RUNTIME,
     packageName: "@anthropic-ai/claude-agent-sdk-darwin-x64",
-    executableDigest: "sha256:af9760c59f947044e2a0d5072343de563f31efb68bd18ccee4f43c5240570de7",
+    executableDigest: "sha256:bbed99bb8a39bb3f94389c5c99d3d02cb75f3f983b5d1bc40b1b0d1efca84713",
   }),
 };
 
 const QUALIFIED_CODEX_LINUX_X64_RUNTIME = Object.freeze({
   runtimePackageName: "@openai/codex",
-  runtimePackageVersion: "0.169.0",
+  runtimePackageVersion: "0.171.0",
   packageName: "@openai/codex-linux-x64",
-  packageVersion: "0.169.0-linux-x64",
-  dependencyDeclaration: "npm:@openai/codex@0.169.0-linux-x64",
+  packageVersion: "0.171.0-linux-x64",
+  dependencyDeclaration: "npm:@openai/codex@0.171.0-linux-x64",
   relativeExecutable: "vendor/x86_64-unknown-linux-musl/bin/codex",
   executableDigest:
-    "sha256:b452ca20f838a8855a88a41050ee4a694033fff4ea3ecdad5633e6e0e8d13f2b",
+    "sha256:b76a027d6b210f9a8da7aaf321dd235c700f0ef7a794d4a5314b9af6c134f0f0",
   environmentVariable: "CODEX_PATH",
 });
 
@@ -87,14 +87,14 @@ const QUALIFIED_CODEX_LINUX_X64_RUNTIME = Object.freeze({
 const QUALIFIED_CLAUDE_PROVIDER_DEPENDENCIES = Object.freeze([
   Object.freeze({
     packageName: "@agentclientprotocol/sdk",
-    packageVersion: "2.6.0",
-    dependencyDeclaration: "2.6.0",
+    packageVersion: "2.8.0",
+    dependencyDeclaration: "2.8.0",
   }),
   Object.freeze({
     packageName: "@anthropic-ai/claude-agent-sdk",
-    packageVersion: "0.3.325",
-    // The ACP package declares 0.3.323; the workspace pins the resolved SDK to 0.3.325.
-    dependencyDeclaration: "0.3.323",
+    packageVersion: "0.3.330",
+    // The ACP package declares 0.3.328; the workspace pins the resolved SDK to 0.3.330.
+    dependencyDeclaration: "0.3.328",
   }),
   Object.freeze({
     packageName: "diff",
