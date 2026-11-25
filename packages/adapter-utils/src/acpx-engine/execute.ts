@@ -1894,9 +1894,13 @@ async function buildRuntime(input: {
     url,
     connectionId,
   }));
+  // Gemini-type agents (including Antigravity's `agy acp`) keep spaces from the
+  // server name in their tool names, and a turn that calls such a tool never
+  // ends. Send them "paperclip-projects" for "Paperclip projects". Only the sent
+  // name changes: mcpIdentity above keeps the original, so saved sessions match.
   const mcpServers: NonNullable<AcpRuntimeOptions["mcpServers"]> = runtimeMcpServers.map((server) => ({
     type: "http",
-    name: server.name,
+    name: acpxAgent === "gemini" ? server.name.toLowerCase().replace(/\s+/g, "-") : server.name,
     url: server.url,
     headers: [{ name: "Authorization", value: `Bearer ${server.token}` }],
   }));

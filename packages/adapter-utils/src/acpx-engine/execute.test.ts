@@ -2792,6 +2792,36 @@ describe("shared ACPX engine runtime behavior", () => {
     expect(first.result.sessionParams?.configFingerprint).toBe(rotatedToken.result.sessionParams?.configFingerprint);
     expect(first.result.sessionParams?.configFingerprint).not.toBe(changedSet.result.sessionParams?.configFingerprint);
   });
+
+  it("sends gemini runtime MCP server names with no spaces but keeps the saved name", async () => {
+    const root = await makeTempRoot();
+    const server = {
+      name: "Paperclip projects",
+      url: "https://paperclip.example/api/tool-gateway/gateways/projects/mcp",
+      connectionId: "connection-1",
+      token: "token-one",
+    };
+    const runtimeMcp = { getServers: () => [server] };
+    const gemini = await runExecutor({
+      agent: "gemini",
+      agentCommand: "node ./fake-acp.js",
+      stateDir: path.join(root, "gemini-state"),
+      env: { HOME: path.join(root, "home") },
+    }, { runtimeMcp });
+    const custom = await runExecutor({
+      agent: "custom",
+      agentCommand: "node ./fake-acp.js",
+      stateDir: path.join(root, "custom-state"),
+    }, { runtimeMcp });
+
+    expect((gemini.runtimeOptions[0]?.mcpServers as Array<{ name: string }>)[0]?.name).toBe("paperclip-projects");
+    expect(gemini.result.sessionParams?.mcpServers).toEqual([{
+      name: "Paperclip projects",
+      url: server.url,
+      connectionId: "connection-1",
+    }]);
+    expect((custom.runtimeOptions[0]?.mcpServers as Array<{ name: string }>)[0]?.name).toBe("Paperclip projects");
+  });
 });
 
 describe("findAncestorBin", () => {
